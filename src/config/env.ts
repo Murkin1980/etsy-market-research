@@ -41,6 +41,12 @@ export const config = {
   checkpoint: {
     interval: envInt('CHECKPOINT_INTERVAL', 5),
   },
+  server: {
+    apiKey: env('API_KEY', ''),
+    rateLimitPerMinute: envInt('RATE_LIMIT_PER_MINUTE', 10),
+    maxConcurrentJobs: envInt('MAX_CONCURRENT_JOBS', 2),
+    maxJobsTotal: envInt('MAX_JOBS_TOTAL', 50),
+  },
   logging: {
     level: env('LOG_LEVEL', 'info'),
   },
@@ -50,6 +56,7 @@ export const config = {
     normalizedData: path.resolve('data/normalized'),
     reports: path.resolve('data/reports'),
     checkpoints: path.resolve('data/checkpoints'),
+    runs: path.resolve('data/runs'),
     logs: path.resolve('logs'),
   },
 } as const;

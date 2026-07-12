@@ -16,10 +16,11 @@ function ensureDir(dir: string): void {
 export async function exportListingsCsv(
   listings: EtsyListing[],
   filename: string = 'listings-summary.csv',
+  outputDir?: string,
 ): Promise<string> {
-  const outputDir = config.paths.reports;
-  ensureDir(outputDir);
-  const filePath = path.join(outputDir, filename);
+  const dir = outputDir ?? config.paths.reports;
+  ensureDir(dir);
+  const filePath = path.join(dir, filename);
 
   const csvWriter = createObjectCsvWriter({
     path: filePath,

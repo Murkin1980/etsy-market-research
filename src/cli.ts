@@ -4,7 +4,8 @@ import { config } from './config/env.js';
 import { APP_VERSION, SCHEMA_VERSION } from './config/defaults.js';
 import { createBrowserManager } from './scraper/browser.js';
 import { scrapeSearchResults } from './scraper/search-scraper.js';
-import { scrapeListing, type ListingScrapeResult } from './scraper/listing-scraper.js';
+import { scrapeListing } from './scraper/listing-scraper.js';
+import type { ListingScrapeResult } from './scraper/listing-scraper.js';
 import { calculateSalesScore, calculateMarketSummary } from './analysis/scoring.js';
 import { extractFeatures, extractMarketFeatures } from './analysis/feature-extractor.js';
 import { LlmAnalyzer } from './analysis/llm-analyzer.js';
@@ -21,8 +22,27 @@ import fs from 'fs';
 import path from 'path';
 import type { EtsyListing, FailedListing, RunMetadata } from './types/listing.js';
 import type { SearchResultItem } from './types/schemas.js';
+import type { LlmAnalysisResult } from './types/schemas.js';
 
 const log = createChildLogger('cli');
+
+function slugify(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+    .substring(0, 60);
+}
+
+function createRunDir(query: string): string {
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19);
+  const slug = slugify(query);
+  const runDir = path.join(config.paths.runs, `${timestamp}_${slug}`);
+  fs.mkdirSync(runDir, { recursive: true });
+  fs.mkdirSync(path.join(runDir, 'raw'), { recursive: true });
+  fs.mkdirSync(path.join(runDir, 'reports'), { recursive: true });
+  return runDir;
+}
 
 interface CliArgs {
   query: string;
@@ -86,76 +106,78 @@ async function buildListingFromScrapeResult(
   searchItem: SearchResultItem,
   targetCurrency: string,
 ): Promise<EtsyListing> {
+  const sr = scrapeResult as ListingScrapeResult;
+
   const featureResult = extractFeatures(
-    scrapeResult.descriptionRaw,
-    scrapeResult.features,
-    scrapeResult.includedItems,
-    scrapeResult.fileFormats,
-    scrapeResult.title,
+    sr.descriptionRaw,
+    sr.features,
+    sr.includedItems,
+    sr.fileFormats,
+    sr.title,
   );
 
   const missingFields: string[] = [];
-  if (!scrapeResult.title) missingFields.push('title');
-  if (scrapeResult.price.amount === null) missingFields.push('price');
-  if (scrapeResult.descriptionRaw === null) missingFields.push('description');
-  if (scrapeResult.imageUrls.length === 0) missingFields.push('images');
+  if (!sr.title) missingFields.push('title');
+  if (sr.price.amount === null) missingFields.push('price');
+  if (sr.descriptionRaw === null) missingFields.push('description');
+  if (sr.imageUrls.length === 0) missingFields.push('images');
 
   let scrapingStatus: EtsyListing['scraping']['status'] = 'success';
   if (missingFields.length > 2) scrapingStatus = 'partial';
 
   const normalizedPrice = await normalizePrice(
     {
-      rawText: scrapeResult.price.rawText,
-      amount: scrapeResult.price.amount,
-      currency: scrapeResult.price.currency,
+      rawText: sr.price.rawText,
+      amount: sr.price.amount,
+      currency: sr.price.currency,
       originalPrice: null,
-      discountPercent: scrapeResult.price.discountPercent,
+      discountPercent: sr.price.discountPercent,
     },
     targetCurrency,
   );
 
   const listing: EtsyListing = {
-    listingId: scrapeResult.listingId ?? searchItem.listingId,
-    url: scrapeResult.url,
-    canonicalUrl: normalizeUrl(scrapeResult.url),
-    title: scrapeResult.title,
-    shopName: scrapeResult.shopName,
-    shopUrl: scrapeResult.shopUrl,
-    productType: scrapeResult.isDigital ? 'digital' : 'unknown',
+    listingId: sr.listingId ?? searchItem.listingId,
+    url: sr.url,
+    canonicalUrl: normalizeUrl(sr.url),
+    title: sr.title,
+    shopName: sr.shopName,
+    shopUrl: sr.shopUrl,
+    productType: sr.isDigital ? 'digital' : 'unknown',
     price: normalizedPrice,
     rating: {
-      listingRating: scrapeResult.listingRating,
-      listingReviewCount: scrapeResult.listingReviewCount,
-      shopRating: scrapeResult.shopRating,
-      shopReviewCount: scrapeResult.shopReviewCount,
-      shopSales: scrapeResult.shopSales,
+      listingRating: sr.listingRating,
+      listingReviewCount: sr.listingReviewCount,
+      shopRating: sr.shopRating,
+      shopReviewCount: sr.shopReviewCount,
+      shopSales: sr.shopSales,
     },
     badges: {
-      bestseller: scrapeResult.badges.bestseller,
-      etsyPick: scrapeResult.badges.etsyPick,
-      popularNow: scrapeResult.badges.popularNow,
+      bestseller: sr.badges.bestseller,
+      etsyPick: sr.badges.etsyPick,
+      popularNow: sr.badges.popularNow,
       ad: searchItem.isAd,
     },
     engagement: {
-      cartsCount: scrapeResult.cartsCount,
-      favoritesCount: scrapeResult.favoritesCount,
+      cartsCount: sr.cartsCount,
+      favoritesCount: sr.favoritesCount,
     },
     content: {
-      descriptionRaw: scrapeResult.descriptionRaw,
-      descriptionCleaned: scrapeResult.descriptionRaw ? cleanText(scrapeResult.descriptionRaw).cleaned : null,
+      descriptionRaw: sr.descriptionRaw,
+      descriptionCleaned: sr.descriptionRaw ? cleanText(sr.descriptionRaw).cleaned : null,
       mainFeature: featureResult.mainFeature,
       features: featureResult.features,
       includedItems: featureResult.includedItems,
       fileFormats: featureResult.fileFormats,
-      relatedSearches: scrapeResult.relatedSearches,
+      relatedSearches: sr.relatedSearches,
       extractedKeywords: featureResult.extractedKeywords,
     },
     media: {
-      mainImageUrl: scrapeResult.mainImageUrl,
-      imageUrls: scrapeResult.imageUrls,
-      imageCount: scrapeResult.imageUrls.length,
-      hasVideo: scrapeResult.hasVideo,
-      videoUrl: scrapeResult.videoUrl,
+      mainImageUrl: sr.mainImageUrl,
+      imageUrls: sr.imageUrls,
+      imageCount: sr.imageUrls.length,
+      hasVideo: sr.hasVideo,
+      videoUrl: sr.videoUrl,
     },
     searchPosition: {
       page: searchItem.page,
@@ -175,10 +197,28 @@ async function buildListingFromScrapeResult(
     },
   };
 
-  // Calculate sales score
   listing.salesEstimate = calculateSalesScore(listing);
-
   return listing;
+}
+
+interface RunResult {
+  status: 'completed' | 'failed';
+  query: string;
+  runDir: string;
+  totalFound: number;
+  successCount: number;
+  partialCount: number;
+  failedCount: number;
+  blockedCount: number;
+  averagePriceUsd: number | null;
+  medianPriceUsd: number | null;
+  durationMs: number;
+  error?: string;
+}
+
+function writeRunResult(runDir: string, result: RunResult): void {
+  const filePath = path.join(runDir, 'run-result.json');
+  fs.writeFileSync(filePath, JSON.stringify(result, null, 2), 'utf-8');
 }
 
 async function main(): Promise<void> {
@@ -190,20 +230,31 @@ async function main(): Promise<void> {
     'Starting Etsy market research',
   );
 
-  // Ensure output directories exist
-  for (const dir of [config.paths.reports, config.paths.rawData, config.paths.checkpoints]) {
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
-  }
+  const runDir = createRunDir(args.query);
+  const reportsDir = path.join(runDir, 'reports');
+  const rawDir = path.join(runDir, 'raw');
+
+  log.info({ runDir }, 'Run directory created');
 
   const checkpointManager = new CheckpointManager();
   let checkpoint = args.resume ? checkpointManager.load() : null;
   if (args.resume && checkpoint) {
-    log.info(
-      { processed: checkpoint.processedUrls.length },
-      'Resuming from checkpoint',
-    );
+    log.info({ processed: checkpoint.processedUrls.length }, 'Resuming from checkpoint');
+  }
+
+  // Load existing results for resume merge
+  let existingListings: EtsyListing[] = [];
+  let existingFailed: FailedListing[] = [];
+  if (args.resume) {
+    const existingListingsPath = path.join(config.paths.reports, `${args.output}.json`);
+    const existingFailedPath = path.join(config.paths.reports, 'failed-listings.json');
+    if (fs.existsSync(existingListingsPath)) {
+      existingListings = JSON.parse(fs.readFileSync(existingListingsPath, 'utf-8')) as EtsyListing[];
+      log.info({ count: existingListings.length }, 'Loaded existing listings for merge');
+    }
+    if (fs.existsSync(existingFailedPath)) {
+      existingFailed = JSON.parse(fs.readFileSync(existingFailedPath, 'utf-8')) as FailedListing[];
+    }
   }
 
   // Phase 1: Search scraping
@@ -226,44 +277,43 @@ async function main(): Promise<void> {
     await browserManager.close();
   }
 
-  // Limit to max listings
   if (searchResults.length > args.maxListings) {
     searchResults = searchResults.slice(0, args.maxListings);
   }
 
   log.info({ total: searchResults.length }, 'Search results collected');
 
-  // Save raw search results
-  const searchResultsPath = path.join(config.paths.rawData, 'search-results.json');
+  const searchResultsPath = path.join(rawDir, 'search-results.json');
   fs.writeFileSync(searchResultsPath, JSON.stringify(searchResults, null, 2));
 
   // Phase 2: Deep listing scraping
   log.info('=== Phase 2: Deep Listing Scraping ===');
-  const listings: EtsyListing[] = [];
-  const failedListings: FailedListing[] = [];
+  const listings: EtsyListing[] = [...existingListings];
+  const failedListings: FailedListing[] = [...existingFailed];
   let blockedCount = 0;
 
   const bm = await createBrowserManager(args.headless);
   const concurrencyLimiter = new ConcurrencyLimiter(args.concurrency);
-  let recentErrors = 0;
+
+  // Sliding window for error tracking
+  const errorWindow: boolean[] = [];
   const windowSize = 10;
 
   try {
     for (let i = 0; i < searchResults.length; i++) {
       const searchItem = searchResults[i];
 
-      // Skip if already processed (resume mode)
       if (checkpoint && checkpointManager.isUrlProcessed(searchItem.url, checkpoint)) {
         log.debug({ url: searchItem.url }, 'Skipping already processed URL');
         continue;
       }
 
-      // Adaptive concurrency
-      if (i >= windowSize) {
-        const errorRate = recentErrors / windowSize;
+      // Sliding window adaptive concurrency
+      if (errorWindow.length >= windowSize) {
+        const errorRate = errorWindow.filter(Boolean).length / windowSize;
         if (errorRate > 0.3) {
           concurrencyLimiter.reduce();
-          log.warn({ errorRate, concurrency: concurrencyLimiter.limit }, 'Reducing concurrency due to high error rate');
+          log.warn({ errorRate, concurrency: concurrencyLimiter.limit }, 'Reducing concurrency');
         }
       }
 
@@ -292,9 +342,12 @@ async function main(): Promise<void> {
           checkpoint.processedUrls.push(searchItem.url);
           checkpoint.successfulUrls.push(searchItem.url);
 
+          errorWindow.push(false);
+          if (errorWindow.length > windowSize) errorWindow.shift();
+
           log.info(
             { title: listing.title?.substring(0, 50), salesLevel: listing.salesEstimate.level },
-            `✓ Scraped: ${listing.title?.substring(0, 50) ?? 'unknown'}`,
+            `Scraped: ${listing.title?.substring(0, 50) ?? 'unknown'}`,
           );
         } else {
           failedListings.push({
@@ -305,6 +358,9 @@ async function main(): Promise<void> {
             attempts: config.scraper.maxRetries + 1,
             timestamp: new Date().toISOString(),
           });
+
+          errorWindow.push(true);
+          if (errorWindow.length > windowSize) errorWindow.shift();
 
           if (errorType === 'BLOCKED') {
             blockedCount++;
@@ -318,24 +374,19 @@ async function main(): Promise<void> {
           }
           checkpoint.processedUrls.push(searchItem.url);
           checkpoint.failedUrls.push(searchItem.url);
-
-          recentErrors++;
         }
       } finally {
         concurrencyLimiter.release();
       }
 
-      // Save checkpoint periodically
       if (checkpoint && (i + 1) % config.checkpoint.interval === 0) {
         checkpointManager.save(checkpoint);
       }
 
-      // Random delay between requests
       if (i < searchResults.length - 1) {
         await randomDelay(args.delayMin, args.delayMax);
       }
 
-      // Progress
       const processed = i + 1;
       const remaining = searchResults.length - processed;
       log.info(
@@ -352,32 +403,20 @@ async function main(): Promise<void> {
   const marketSummary = calculateMarketSummary(listings);
   extractMarketFeatures(listings);
 
-  let llmAnalysis = null;
+  let llmAnalysis: LlmAnalysisResult | null = null;
   if (args.useLlm) {
     const apiKey = args.llmProvider === 'anthropic' ? config.anthropicApiKey : config.openaiApiKey;
     if (apiKey) {
       log.info({ provider: args.llmProvider }, '=== Phase 3b: LLM Analysis ===');
       try {
-        const analyzer = new LlmAnalyzer({
-          provider: args.llmProvider,
-          apiKey,
-          model: args.llmModel || undefined,
-        });
+        const analyzer = new LlmAnalyzer({ provider: args.llmProvider, apiKey, model: args.llmModel || undefined });
         llmAnalysis = await analyzer.analyze(listings);
-        log.info('LLM analysis completed successfully');
+        log.info('LLM analysis completed');
       } catch (err) {
         log.error({ error: (err as Error).message }, 'LLM analysis failed');
-        failedListings.push({
-          url: '',
-          listingId: null,
-          errorType: 'LLM_ERROR',
-          message: (err as Error).message,
-          attempts: 1,
-          timestamp: new Date().toISOString(),
-        });
       }
     } else {
-      log.warn(`LLM analysis requested but ${args.llmProvider === 'anthropic' ? 'ANTHROPIC_API_KEY' : 'OPENAI_API_KEY'} not set`);
+      log.warn(`LLM requested but ${args.llmProvider === 'anthropic' ? 'ANTHROPIC_API_KEY' : 'OPENAI_API_KEY'} not set`);
     }
   }
 
@@ -385,74 +424,71 @@ async function main(): Promise<void> {
   log.info('=== Phase 4: Export ===');
   const durationMs = Date.now() - startTime;
 
-  exportListingsJson(listings, `${args.output}.json`);
-  await exportListingsCsv(listings, `${args.output.replace('-full', '-summary')}.csv`);
-  exportFailedListings(failedListings);
+  exportListingsJson(listings, `${args.output}.json`, reportsDir);
+  await exportListingsCsv(listings, `${args.output.replace('-full', '-summary')}.csv`, reportsDir);
+  exportFailedListings(failedListings, 'failed-listings.json', reportsDir);
 
   if (llmAnalysis) {
-    exportMarketAnalysis(llmAnalysis);
+    exportMarketAnalysis(llmAnalysis, 'market-analysis.json', reportsDir);
   }
 
   const metadata: RunMetadata = {
     query: args.query,
     startedAt: new Date(startTime).toISOString(),
     completedAt: new Date().toISOString(),
-    params: {
-      pages: args.pages,
-      maxListings: args.maxListings,
-      currency: args.currency,
-      country: args.country,
-      language: args.language,
-      headless: args.headless,
-      concurrency: args.concurrency,
-      useLlm: args.useLlm,
-    },
+    params: { pages: args.pages, maxListings: args.maxListings, currency: args.currency, country: args.country, language: args.language, headless: args.headless, concurrency: args.concurrency, useLlm: args.useLlm },
     totalFound: searchResults.length,
     successCount: listings.filter((l) => l.scraping.status === 'success').length,
     partialCount: listings.filter((l) => l.scraping.status === 'partial').length,
-    failedCount: failedListings.length,
+    failedCount: failedListings.length - existingFailed.length,
     blockedCount,
     durationMs,
     schemaVersion: SCHEMA_VERSION,
     appVersion: APP_VERSION,
   };
-  exportRunMetadata(metadata);
+  exportRunMetadata(metadata, 'run-metadata.json', reportsDir);
 
-  // Clear checkpoint on successful completion
   checkpointManager.clear();
 
-  // Final summary
-  log.info('=== Research Complete ===');
-  log.info(
-    {
-      query: args.query,
-      totalFound: searchResults.length,
-      successCount: metadata.successCount,
-      partialCount: metadata.partialCount,
-      failedCount: metadata.failedCount,
-      blockedCount,
-      durationMs,
-      averagePriceUsd: marketSummary.averagePriceUsd,
-    },
-    'Summary',
-  );
+  // Write structured result for server to read
+  const runResult: RunResult = {
+    status: 'completed',
+    query: args.query,
+    runDir,
+    totalFound: searchResults.length,
+    successCount: metadata.successCount,
+    partialCount: metadata.partialCount,
+    failedCount: metadata.failedCount,
+    blockedCount,
+    averagePriceUsd: marketSummary.averagePriceUsd,
+    medianPriceUsd: marketSummary.medianPriceUsd,
+    durationMs,
+  };
+  writeRunResult(runDir, runResult);
 
-  console.log('\n=== RESEARCH COMPLETE ===');
-  console.log(`Query: ${args.query}`);
-  console.log(`Found: ${searchResults.length} results`);
-  console.log(`Scraped: ${listings.length} listings`);
-  console.log(`Failed: ${failedListings.length}`);
-  console.log(`Blocked: ${blockedCount}`);
-  console.log(`Duration: ${Math.round(durationMs / 1000)}s`);
-  if (marketSummary.averagePriceUsd) {
-    console.log(`Avg Price USD: $${marketSummary.averagePriceUsd}`);
-    console.log(`Median Price USD: $${marketSummary.medianPriceUsd}`);
-  }
-  console.log(`\nOutput: ${config.paths.reports}`);
+  // Also write to stdout for backward compat
+  console.log(JSON.stringify(runResult));
+
+  log.info('=== Research Complete ===');
+  log.info({ ...runResult, runDir }, 'Summary');
 }
 
 main().catch((err) => {
   log.fatal({ error: (err as Error).message }, 'Fatal error');
-  console.error('Fatal error:', (err as Error).message);
+  const failResult: RunResult = {
+    status: 'failed',
+    query: process.argv.find((a) => a === '--query') ? process.argv[process.argv.indexOf('--query') + 1] : 'unknown',
+    runDir: '',
+    totalFound: 0,
+    successCount: 0,
+    partialCount: 0,
+    failedCount: 0,
+    blockedCount: 0,
+    averagePriceUsd: null,
+    medianPriceUsd: null,
+    durationMs: 0,
+    error: (err as Error).message,
+  };
+  console.log(JSON.stringify(failResult));
   process.exit(1);
 });
