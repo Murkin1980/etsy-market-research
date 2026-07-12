@@ -22,6 +22,8 @@ function envBool(key: string, fallback: boolean): boolean {
 
 export const config = {
   anthropicApiKey: env('ANTHROPIC_API_KEY'),
+  openaiApiKey: env('OPENAI_API_KEY'),
+  llmProvider: env('LLM_PROVIDER', 'openai') as 'anthropic' | 'openai',
   headless: envBool('HEADLESS', true),
   defaultCurrency: env('DEFAULT_CURRENCY', 'USD'),
   defaultCountry: env('DEFAULT_COUNTRY', 'US'),

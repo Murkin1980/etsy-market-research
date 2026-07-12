@@ -23,7 +23,12 @@
     "docker:down": "docker compose down",
     "docker:logs": "docker compose logs -f"
   },
-  "keywords": ["etsy", "market-research", "scraper", "digital-products"],
+  "keywords": [
+    "etsy",
+    "market-research",
+    "scraper",
+    "digital-products"
+  ],
   "author": "",
   "license": "MIT",
   "dependencies": {
@@ -31,6 +36,7 @@
     "cheerio": "^1.0.0",
     "csv-writer": "^1.6.0",
     "dotenv": "^16.4.7",
+    "openai": "^6.46.0",
     "pino": "^9.6.0",
     "pino-pretty": "^13.0.0",
     "playwright": "^1.49.1",
@@ -38,14 +44,14 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@eslint/js": "^9.18.0",
     "@types/node": "^22.10.5",
     "@types/yargs": "^17.0.33",
     "eslint": "^9.18.0",
-    "@eslint/js": "^9.18.0",
-    "typescript-eslint": "^8.21.0",
     "prettier": "^3.4.2",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3",
+    "typescript-eslint": "^8.21.0",
     "vitest": "^3.0.4"
   }
 }

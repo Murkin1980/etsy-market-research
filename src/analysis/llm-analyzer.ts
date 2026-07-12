@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
+import OpenAI from 'openai';
 import { LlmAnalysisResultSchema, type LlmAnalysisResult } from '../types/schemas.js';
 import type { EtsyListing } from '../types/listing.js';
 import { createChildLogger } from '../utils/logger.js';
@@ -68,49 +69,114 @@ const USER_PROMPT_TEMPLATE = `Проанализируй данные по ша�
 Данные о товарах:
 {data}`;
 
+export type LlmProvider = 'anthropic' | 'openai';
+
 interface LlmAnalyzerOptions {
+  provider: LlmProvider;
   apiKey: string;
   model?: string;
 }
 
+function buildUserPrompt(listings: EtsyListing[]): string {
+  const payload = listings.map((l) => ({
+    listingId: l.listingId,
+    title: l.title,
+    url: l.url,
+    price: l.price,
+    rating: l.rating,
+    badges: l.badges,
+    engagement: l.engagement,
+    content: {
+      mainFeature: l.content.mainFeature,
+      features: l.content.features,
+      includedItems: l.content.includedItems,
+      fileFormats: l.content.fileFormats,
+    },
+    media: {
+      imageCount: l.media.imageCount,
+      hasVideo: l.media.hasVideo,
+    },
+    searchPosition: l.searchPosition,
+    salesEstimate: l.salesEstimate,
+  }));
+
+  const dataJson = JSON.stringify(payload, null, 2);
+  return USER_PROMPT_TEMPLATE.replace('{data}', dataJson);
+}
+
+function extractJsonFromResponse(rawText: string): string {
+  const jsonMatch = rawText.match(/```json\s*([\s\S]*?)\s*```/) ?? rawText.match(/\{[\s\S]*\}/);
+  if (jsonMatch) {
+    return jsonMatch[1] ?? jsonMatch[0];
+  }
+  return rawText;
+}
+
+function validateAndParse(jsonStr: string): LlmAnalysisResult | null {
+  try {
+    const parsed = JSON.parse(jsonStr);
+    const result = LlmAnalysisResultSchema.safeParse(parsed);
+    if (result.success) {
+      return result.data;
+    }
+    log.warn({ errors: result.error.errors }, 'LLM response failed Zod validation');
+    return null;
+  } catch (err) {
+    log.warn({ error: (err as Error).message }, 'Failed to parse LLM JSON');
+    return null;
+  }
+}
+
+function parseResponse(rawText: string): LlmAnalysisResult {
+  const jsonStr = extractJsonFromResponse(rawText);
+  const result = validateAndParse(jsonStr);
+  if (result) return result;
+
+  const fixedJson = jsonStr
+    .replace(/,\s*}/g, '}')
+    .replace(/,\s*]/g, ']')
+    .replace(/'/g, '"');
+
+  const fixedResult = validateAndParse(fixedJson);
+  if (fixedResult) return fixedResult;
+
+  log.error({ rawResponse: rawText.substring(0, 500) }, 'Failed to parse LLM response');
+  throw new Error('Invalid JSON from LLM API');
+}
+
 export class LlmAnalyzer {
-  private client: Anthropic;
+  private provider: LlmProvider;
+  private anthropicClient?: Anthropic;
+  private openaiClient?: OpenAI;
   private model: string;
 
   constructor(options: LlmAnalyzerOptions) {
-    this.client = new Anthropic({ apiKey: options.apiKey });
-    this.model = options.model ?? 'claude-sonnet-4-20250514';
+    this.provider = options.provider;
+
+    if (this.provider === 'anthropic') {
+      this.anthropicClient = new Anthropic({ apiKey: options.apiKey });
+      this.model = options.model ?? 'claude-sonnet-4-20250514';
+    } else {
+      this.openaiClient = new OpenAI({ apiKey: options.apiKey });
+      this.model = options.model ?? 'gpt-4o';
+    }
   }
 
   async analyze(listings: EtsyListing[]): Promise<LlmAnalysisResult> {
-    const payload = listings.map((l) => ({
-      listingId: l.listingId,
-      title: l.title,
-      url: l.url,
-      price: l.price,
-      rating: l.rating,
-      badges: l.badges,
-      engagement: l.engagement,
-      content: {
-        mainFeature: l.content.mainFeature,
-        features: l.content.features,
-        includedItems: l.content.includedItems,
-        fileFormats: l.content.fileFormats,
-      },
-      media: {
-        imageCount: l.media.imageCount,
-        hasVideo: l.media.hasVideo,
-      },
-      searchPosition: l.searchPosition,
-      salesEstimate: l.salesEstimate,
-    }));
+    const userPrompt = buildUserPrompt(listings);
+    log.info(
+      { listingsCount: listings.length, provider: this.provider, model: this.model },
+      'Sending analysis request',
+    );
 
-    const dataJson = JSON.stringify(payload, null, 2);
-    const userPrompt = USER_PROMPT_TEMPLATE.replace('{data}', dataJson);
+    if (this.provider === 'anthropic') {
+      return this.analyzeWithAnthropic(userPrompt);
+    }
+    return this.analyzeWithOpenAI(userPrompt);
+  }
 
-    log.info({ listingsCount: listings.length, model: this.model }, 'Sending analysis request to Claude');
-
-    const response = await this.client.messages.create({
+  private async analyzeWithAnthropic(userPrompt: string): Promise<LlmAnalysisResult> {
+    const response = await this.anthropicClient!.messages.create({
       model: this.model,
       max_tokens: 8000,
       system: SYSTEM_PROMPT,
@@ -122,54 +188,25 @@ export class LlmAnalyzer {
       throw new Error('No text content in Claude response');
     }
 
-    const rawText = textBlock.text;
-
-    // Try to extract JSON from the response
-    const jsonMatch = rawText.match(/```json\s*([\s\S]*?)\s*```/) ?? rawText.match(/\{[\s\S]*\}/);
-    let jsonStr: string;
-
-    if (jsonMatch) {
-      jsonStr = jsonMatch[1] ?? jsonMatch[0];
-    } else {
-      jsonStr = rawText;
-    }
-
-    // Validate with Zod
-    const result = this.validateAndParse(jsonStr);
-    if (result) {
-      return result;
-    }
-
-    // Try to fix common JSON issues
-    const fixedJson = jsonStr
-      .replace(/,\s*}/g, '}')
-      .replace(/,\s*]/g, ']')
-      .replace(/'/g, '"');
-
-    const fixedResult = this.validateAndParse(fixedJson);
-    if (fixedResult) {
-      return fixedResult;
-    }
-
-    log.error({ rawResponse: rawText.substring(0, 500) }, 'Failed to parse Claude response');
-    throw new Error('Invalid JSON from Claude API');
+    return parseResponse(textBlock.text);
   }
 
-  private validateAndParse(jsonStr: string): LlmAnalysisResult | null {
-    try {
-      const parsed = JSON.parse(jsonStr);
-      const result = LlmAnalysisResultSchema.safeParse(parsed);
-      if (result.success) {
-        return result.data;
-      }
-      log.warn(
-        { errors: result.error.errors },
-        'Claude response failed Zod validation',
-      );
-      return null;
-    } catch (err) {
-      log.warn({ error: (err as Error).message }, 'Failed to parse Claude JSON');
-      return null;
+  private async analyzeWithOpenAI(userPrompt: string): Promise<LlmAnalysisResult> {
+    const response = await this.openaiClient!.chat.completions.create({
+      model: this.model,
+      max_tokens: 8000,
+      messages: [
+        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'user', content: userPrompt },
+      ],
+      response_format: { type: 'json_object' },
+    });
+
+    const content = response.choices[0]?.message?.content;
+    if (!content) {
+      throw new Error('No content in OpenAI response');
     }
+
+    return parseResponse(content);
   }
 }

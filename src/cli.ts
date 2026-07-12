@@ -36,6 +36,8 @@ interface CliArgs {
   delayMin: number;
   delayMax: number;
   useLlm: boolean;
+  llmProvider: 'anthropic' | 'openai';
+  llmModel: string;
   output: string;
   resume: boolean;
 }
@@ -53,6 +55,8 @@ function parseArgs(): CliArgs {
     .option('delay-min', { type: 'number', default: config.scraper.delayMinMs })
     .option('delay-max', { type: 'number', default: config.scraper.delayMaxMs })
     .option('use-llm', { type: 'boolean', default: false })
+    .option('llm-provider', { type: 'string', default: config.llmProvider, choices: ['anthropic', 'openai'] })
+    .option('llm-model', { type: 'string', default: '' })
     .option('output', { type: 'string', default: 'listings-full' })
     .option('resume', { type: 'boolean', default: false })
     .help()
@@ -70,6 +74,8 @@ function parseArgs(): CliArgs {
     delayMin: parsed['delay-min'],
     delayMax: parsed['delay-max'],
     useLlm: parsed['use-llm'],
+    llmProvider: parsed['llm-provider'] as 'anthropic' | 'openai',
+    llmModel: parsed['llm-model'],
     output: parsed.output,
     resume: parsed.resume,
   };
@@ -347,25 +353,32 @@ async function main(): Promise<void> {
   extractMarketFeatures(listings);
 
   let llmAnalysis = null;
-  if (args.useLlm && config.anthropicApiKey) {
-    log.info('=== Phase 3b: Claude API Analysis ===');
-    try {
-      const analyzer = new LlmAnalyzer({ apiKey: config.anthropicApiKey });
-      llmAnalysis = await analyzer.analyze(listings);
-      log.info('Claude analysis completed successfully');
-    } catch (err) {
-      log.error({ error: (err as Error).message }, 'Claude analysis failed');
-      failedListings.push({
-        url: '',
-        listingId: null,
-        errorType: 'LLM_ERROR',
-        message: (err as Error).message,
-        attempts: 1,
-        timestamp: new Date().toISOString(),
-      });
+  if (args.useLlm) {
+    const apiKey = args.llmProvider === 'anthropic' ? config.anthropicApiKey : config.openaiApiKey;
+    if (apiKey) {
+      log.info({ provider: args.llmProvider }, '=== Phase 3b: LLM Analysis ===');
+      try {
+        const analyzer = new LlmAnalyzer({
+          provider: args.llmProvider,
+          apiKey,
+          model: args.llmModel || undefined,
+        });
+        llmAnalysis = await analyzer.analyze(listings);
+        log.info('LLM analysis completed successfully');
+      } catch (err) {
+        log.error({ error: (err as Error).message }, 'LLM analysis failed');
+        failedListings.push({
+          url: '',
+          listingId: null,
+          errorType: 'LLM_ERROR',
+          message: (err as Error).message,
+          attempts: 1,
+          timestamp: new Date().toISOString(),
+        });
+      }
+    } else {
+      log.warn(`LLM analysis requested but ${args.llmProvider === 'anthropic' ? 'ANTHROPIC_API_KEY' : 'OPENAI_API_KEY'} not set`);
     }
-  } else if (args.useLlm && !config.anthropicApiKey) {
-    log.warn('LLM analysis requested but ANTHROPIC_API_KEY not set');
   }
 
   // Phase 4: Export
