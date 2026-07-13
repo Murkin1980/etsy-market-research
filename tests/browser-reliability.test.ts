@@ -1,8 +1,10 @@
 import fs from 'fs';
 import path from 'path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { detectBlockReason } from '../src/scraper/browser.js';
+import type { BrowserManager } from '../src/scraper/browser.js';
 import { classifyScrapeError } from '../src/scraper/listing-scraper.js';
+import { scrapeSearchResults } from '../src/scraper/search-scraper.js';
 import { RetryError, withRetry } from '../src/utils/retry.js';
 
 const fixture = (name: string): string =>
@@ -48,5 +50,30 @@ describe('browser reliability helpers', () => {
     expect(classifyScrapeError(new RetryError('failed', 3, new Error('page.goto: Timeout exceeded'))))
       .toBe('TIMEOUT');
     expect(classifyScrapeError(new Error('net::ERR_CONNECTION_RESET'))).toBe('HTTP_ERROR');
+  });
+
+  it('surfaces a blocked search page instead of returning a successful empty search', async () => {
+    const page = {
+      goto: vi.fn().mockResolvedValue(undefined),
+      waitForSelector: vi.fn().mockRejectedValue(new Error('no listing cards')),
+      waitForTimeout: vi.fn().mockResolvedValue(undefined),
+    };
+    const browserManager = {
+      getPage: () => page,
+      isBlocked: vi.fn().mockResolvedValue(true),
+    } as unknown as BrowserManager;
+
+    const result = await scrapeSearchResults(browserManager, {
+      query: 'planner',
+      pages: 1,
+      currency: 'USD',
+      country: 'US',
+      language: 'en-US',
+      delayMinMs: 1,
+      delayMaxMs: 2,
+      timeoutMs: 100,
+    });
+
+    expect(result).toEqual({ results: [], blockedCount: 1 });
   });
 });
