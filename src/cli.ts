@@ -13,7 +13,7 @@ import { LlmAnalyzer } from './analysis/llm-analyzer.js';
 import { normalizePrice } from './normalization/currency.js';
 import { normalizeUrl } from './normalization/url.js';
 import { cleanText } from './normalization/text-cleaner.js';
-import { exportListingsJson, exportMarketAnalysis, exportFailedListings, exportRunMetadata } from './exporters/json-exporter.js';
+import { exportListingsJson, exportMarketAnalysis, exportFailedListings, exportRunMetadata, validateListingsForExport } from './exporters/json-exporter.js';
 import { exportListingsCsv } from './exporters/csv-exporter.js';
 import { CheckpointManager } from './storage/checkpoint.js';
 import { randomDelay } from './utils/delay.js';
@@ -179,11 +179,15 @@ async function buildListingFromScrapeResult(
       page: searchItem.page,
       position: searchItem.position,
     },
+    evidence: sr.evidence,
     salesEstimate: {
       level: 'Unknown',
       score: 0,
+      listingEvidenceScore: 0,
+      shopProxyScore: 0,
       confidence: 0,
       reasons: [],
+      shopProxyReasons: [],
     },
     scraping: {
       status: scrapingStatus,
@@ -260,7 +264,8 @@ async function main(): Promise<void> {
     const existingListingsPath = path.join(reportsDir, `${outputName}.json`);
     const existingFailedPath = path.join(reportsDir, 'failed-listings.json');
     if (fs.existsSync(existingListingsPath)) {
-      existingListings = JSON.parse(fs.readFileSync(existingListingsPath, 'utf-8')) as EtsyListing[];
+      const storedListings = JSON.parse(fs.readFileSync(existingListingsPath, 'utf-8')) as EtsyListing[];
+      existingListings = validateListingsForExport(storedListings);
       log.info({ count: existingListings.length }, 'Loaded existing listings for merge');
     }
     if (fs.existsSync(existingFailedPath)) {

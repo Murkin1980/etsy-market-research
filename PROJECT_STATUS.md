@@ -64,14 +64,15 @@ Status: **Completed**
 
 ## Stage 5 — Data quality and market analysis
 
-Status: **Pending**
+Status: **Completed**
 
-- [ ] Separate listing evidence from shop-level proxy signals in scoring.
-- [ ] Record extraction source and confidence for important fields.
-- [ ] Improve locale-aware number, price, rating, and review parsing.
-- [ ] Replace static-first exchange rates with a dated provider/cache policy.
-- [ ] Validate exported listings with Zod before writing reports.
-- [ ] Add deterministic tests for scoring, summaries, and LLM payload construction.
+- [x] Separate listing evidence from shop-level proxy signals in scoring.
+- [x] Record extraction source and confidence for important fields.
+- [x] Improve locale-aware number, price, rating, and review parsing.
+- [x] Replace static-first exchange rates with a dated live-provider/cache policy and labeled fallback.
+- [x] Validate JSON and CSV listing exports with Zod before writing reports.
+- [x] Upgrade legacy stage-4 listings during resume/export validation.
+- [x] Add deterministic tests for scoring, summaries, exchange rates, exports, and LLM payload construction.
 
 ## Stage 6 — Documentation, deployment, and release
 
@@ -88,7 +89,7 @@ Status: **Pending**
 
 ```text
 npm run typecheck  PASS
-npm test           PASS (70/70)
+npm test           PASS (80/80)
 npm run build      PASS
 npm run lint       PASS
 npm audit          PASS (0 known vulnerabilities)
@@ -97,8 +98,8 @@ browser smoke      PASS (local Chromium + /health, no console errors)
 
 ## Current known high-priority risks
 
-1. Listing evidence and shop-level proxy signals are still mixed in sales scoring.
-2. Important extracted fields do not yet record source and confidence.
-3. Common currency pairs use static rates before the live provider is attempted.
-4. Exported listing objects are not validated with Zod before being written.
-5. CI and container smoke tests are not yet automated in GitHub Actions.
+1. README output paths and API parameter documentation need a release pass.
+2. npm scripts still need explicit cross-platform verification.
+3. Docker and GCE deployment defaults need a final hardening review.
+4. CI and container smoke tests are not yet automated in GitHub Actions.
+5. A controlled, documented live Etsy smoke test remains for release validation.

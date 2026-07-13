@@ -73,6 +73,14 @@ describe('saved HTML parser integration', () => {
     expect(result.imageUrls).toHaveLength(2);
     expect(result.fileFormats).toEqual(expect.arrayContaining(['PDF', 'PNG', 'ZIP']));
     expect(result.badges).toEqual({ bestseller: true, etsyPick: true, popularNow: true });
+    expect(result.evidence).toMatchObject({
+      title: { source: 'dom', confidence: 0.98 },
+      price: { source: 'dom', confidence: 0.98 },
+      listingRating: { source: 'dom', confidence: 0.9 },
+      listingReviewCount: { source: 'search_result', confidence: 0.7 },
+      description: { source: 'dom', confidence: 0.95 },
+      images: { source: 'dom', confidence: 0.95 },
+    });
     expect(completeness).toEqual({ status: 'success', missingFields: [] });
   });
 
@@ -82,6 +90,20 @@ describe('saved HTML parser integration', () => {
     expect(evaluateScrapeCompleteness(result)).toEqual({
       status: 'partial',
       missingFields: ['description', 'images'],
+    });
+  });
+
+  it('parses localized rating and compact review count from search cards', () => {
+    const html = `
+      <article class="v2-listing-card" data-listing-id="555">
+        <a class="listing-link" href="/listing/555/localized"><span class="v2-listing-card__title">Localized</span></a>
+        <span class="stars" aria-label="4,7 out of 5 stars"></span>
+        <span class="v2-listing-card__rating-count">(1,2k)</span>
+      </article>`;
+
+    expect(parseSearchPage(html, 1).results[0]).toMatchObject({
+      rating: 4.7,
+      displayedReviewCount: 1200,
     });
   });
 });

@@ -1,79 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { calculateSalesScore } from '../src/analysis/scoring.js';
-import type { EtsyListing } from '../src/types/listing.js';
-
-function createMockListing(overrides: Partial<EtsyListing> = {}): EtsyListing {
-  return {
-    listingId: '123',
-    url: 'https://www.etsy.com/listing/123',
-    canonicalUrl: 'https://www.etsy.com/listing/123',
-    title: 'Test Listing',
-    shopName: 'TestShop',
-    shopUrl: 'https://www.etsy.com/shop/TestShop',
-    productType: 'digital',
-    price: {
-      rawText: '$10.00',
-      amount: 10,
-      currency: 'USD',
-      originalPrice: null,
-      discountPercent: null,
-      amountUsd: 10,
-      exchangeRate: null,
-      exchangeRateDate: null,
-    },
-    rating: {
-      listingRating: null,
-      listingReviewCount: null,
-      shopRating: null,
-      shopReviewCount: null,
-      shopSales: null,
-    },
-    badges: {
-      bestseller: false,
-      etsyPick: false,
-      popularNow: false,
-      ad: false,
-    },
-    engagement: {
-      cartsCount: null,
-      favoritesCount: null,
-    },
-    content: {
-      descriptionRaw: null,
-      descriptionCleaned: null,
-      mainFeature: null,
-      features: [],
-      includedItems: [],
-      fileFormats: [],
-      relatedSearches: [],
-      extractedKeywords: [],
-    },
-    media: {
-      mainImageUrl: null,
-      imageUrls: [],
-      imageCount: 0,
-      hasVideo: false,
-      videoUrl: null,
-    },
-    searchPosition: {
-      page: 1,
-      position: 50,
-    },
-    salesEstimate: {
-      level: 'Unknown',
-      score: 0,
-      confidence: 0,
-      reasons: [],
-    },
-    scraping: {
-      status: 'success',
-      scrapedAt: new Date().toISOString(),
-      missingFields: [],
-      warnings: [],
-    },
-    ...overrides,
-  };
-}
+import { calculateMarketSummary, calculateSalesScore } from '../src/analysis/scoring.js';
+import { createMockListing } from './helpers/listing-fixture.js';
 
 describe('sales-estimator', () => {
   it('returns Low for minimal listing (no reviews, no badges, low position)', () => {
@@ -102,7 +29,7 @@ describe('sales-estimator', () => {
     expect(estimate.reasons.length).toBeGreaterThan(0);
   });
 
-  it('returns Medium for moderate metrics', () => {
+  it('does not promote a listing using shop-level proxy metrics', () => {
     const listing = createMockListing({
       searchPosition: { page: 1, position: 50 },
       rating: {
@@ -114,9 +41,10 @@ describe('sales-estimator', () => {
       },
     });
     const estimate = calculateSalesScore(listing);
-    expect(estimate.level).toBe('Medium');
-    expect(estimate.score).toBeGreaterThanOrEqual(3);
-    expect(estimate.score).toBeLessThanOrEqual(5);
+    expect(estimate.level).toBe('Low');
+    expect(estimate.listingEvidenceScore).toBe(2);
+    expect(estimate.shopProxyScore).toBe(1);
+    expect(estimate.shopProxyReasons[0]).toMatch(/^Moderate shop sales proxy: 1\D?000$/u);
   });
 
   it('gives bonus for popular now', () => {
@@ -179,5 +107,40 @@ describe('sales-estimator', () => {
     const minConfidence = calculateSalesScore(minimal);
     const maxConfidence = calculateSalesScore(complete);
     expect(maxConfidence.confidence).toBeGreaterThan(minConfidence.confidence);
+  });
+
+  it('keeps a high shop rating out of the listing evidence score', () => {
+    const estimate = calculateSalesScore(createMockListing({
+      rating: {
+        listingRating: null,
+        listingReviewCount: null,
+        shopRating: 5,
+        shopReviewCount: 1000,
+        shopSales: null,
+      },
+    }));
+
+    expect(estimate.listingEvidenceScore).toBe(0);
+    expect(estimate.shopProxyScore).toBe(1);
+    expect(estimate.shopProxyReasons).toContain('High shop rating proxy: 5');
+  });
+
+  it('calculates deterministic market price coverage and median', () => {
+    const listings = [10, 30, null].map((amountUsd, index) => createMockListing({
+      listingId: String(index),
+      price: {
+        ...createMockListing().price,
+        amount: amountUsd,
+        amountUsd,
+      },
+    }));
+
+    expect(calculateMarketSummary(listings)).toEqual({
+      averagePriceUsd: 20,
+      medianPriceUsd: 20,
+      totalAnalyzed: 3,
+      pricedListings: 2,
+      priceCoverage: 0.67,
+    });
   });
 });

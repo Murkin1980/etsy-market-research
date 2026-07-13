@@ -5,8 +5,8 @@ import { RetryError, withRetry } from '../utils/retry.js';
 import { normalizeUrl } from '../normalization/url.js';
 import type { BrowserManager } from './browser.js';
 import * as cheerio from 'cheerio';
-import type { ErrorType } from '../types/listing.js';
-import { parsePrice } from '../normalization/currency.js';
+import type { ErrorType, ListingFieldEvidence } from '../types/listing.js';
+import { parseLocalizedNumber, parseNumericValue, parsePrice } from '../normalization/currency.js';
 
 const log = createChildLogger('listing-scraper');
 
@@ -50,6 +50,7 @@ export interface ListingScrapeResult {
   breadcrumbs: string[];
   cartsCount: number | null;
   favoritesCount: number | null;
+  evidence: ListingFieldEvidence;
 }
 
 export function classifyScrapeError(error: Error): ErrorType {
@@ -140,16 +141,20 @@ export function parseListingHtml(html: string, searchItem: SearchResultItem): Li
   });
 
   // Title
+  const domTitle = $(LISTING_SELECTORS.title).first().text().trim();
+  const jsonLdTitle = extractFromJsonLd(jsonLdData, 'name');
   const title =
-    $(LISTING_SELECTORS.title).first().text().trim() ||
-    extractFromJsonLd(jsonLdData, 'name') ||
+    domTitle ||
+    jsonLdTitle ||
     searchItem.titlePreview ||
     null;
 
   // Shop
+  const domShopName = $(LISTING_SELECTORS.shopName).first().text().trim();
+  const jsonLdShopName = extractFromJsonLd(jsonLdData, 'seller', 'name');
   const shopName =
-    $(LISTING_SELECTORS.shopName).first().text().trim() ||
-    extractFromJsonLd(jsonLdData, 'seller', 'name') ||
+    domShopName ||
+    jsonLdShopName ||
     searchItem.shopName ||
     null;
 
@@ -159,9 +164,11 @@ export function parseListingHtml(html: string, searchItem: SearchResultItem): Li
     : null;
 
   // Price
+  const domPriceText = $(LISTING_SELECTORS.priceValue).first().text().trim();
+  const jsonLdPrice = extractFromJsonLd(jsonLdData, 'offers', 'price');
   const priceRawText =
-    $(LISTING_SELECTORS.priceValue).first().text().trim() ||
-    extractFromJsonLd(jsonLdData, 'offers', 'price') ||
+    domPriceText ||
+    jsonLdPrice ||
     null;
 
   const originalPriceText =
@@ -191,6 +198,7 @@ export function parseListingHtml(html: string, searchItem: SearchResultItem): Li
 
   // Rating — listing-specific
   let listingRating: number | null = searchItem.rating;
+  let listingRatingFromDom = false;
   const listingReviewCount: number | null = searchItem.displayedReviewCount;
 
   // Try to find listing-specific review section
@@ -200,8 +208,11 @@ export function parseListingHtml(html: string, searchItem: SearchResultItem): Li
     const ratingEl = reviewSection.find('[class*="star"], [aria-label*="star"]').first();
     if (ratingEl.length) {
       const ariaLabel = ratingEl.attr('aria-label') ?? '';
-      const match = ariaLabel.match(/([\d.]+)/);
-      if (match) listingRating = parseFloat(match[1]);
+      const match = ariaLabel.match(/([\d.,]+)/);
+      if (match) {
+        listingRating = parseLocalizedNumber(match[1]);
+        listingRatingFromDom = true;
+      }
     }
   }
 
@@ -215,17 +226,18 @@ export function parseListingHtml(html: string, searchItem: SearchResultItem): Li
     return $(el).text().toLowerCase().includes('sale');
   }).first().text();
   if (salesText) {
-    const salesMatch = salesText.match(/([\d,]+)/);
+    const salesMatch = salesText.match(/([\d,.\s\u00a0\u202f]+(?:k|m|к|м|тыс\.?|млн\.?)?)/iu);
     if (salesMatch) {
-      shopSales = parseInt(salesMatch[1].replace(/,/g, ''), 10);
-      if (!Number.isFinite(shopSales)) shopSales = null;
+      shopSales = parseNumericValue(salesMatch[1]);
     }
   }
 
   // Description
-  const descriptionRaw =
+  const domDescription =
     $(LISTING_SELECTORS.fullDescription).text().trim() ||
-    $(LISTING_SELECTORS.description).text().trim() ||
+    $(LISTING_SELECTORS.description).text().trim();
+  const descriptionRaw =
+    domDescription ||
     null;
 
   // Features — look for bullet points or feature lists
@@ -274,6 +286,44 @@ export function parseListingHtml(html: string, searchItem: SearchResultItem): Li
     }
   });
   const mainImageUrl = imageUrls[0] ?? searchItem.imageUrl ?? null;
+
+  const evidence: ListingFieldEvidence = {
+    title: domTitle
+      ? { source: 'dom', confidence: 0.98 }
+      : jsonLdTitle
+        ? { source: 'json_ld', confidence: 0.95 }
+        : searchItem.titlePreview
+          ? { source: 'search_result', confidence: 0.7 }
+          : { source: null, confidence: 0 },
+    shopName: domShopName
+      ? { source: 'dom', confidence: 0.95 }
+      : jsonLdShopName
+        ? { source: 'json_ld', confidence: 0.9 }
+        : searchItem.shopName
+          ? { source: 'search_result', confidence: 0.65 }
+          : { source: null, confidence: 0 },
+    price: domPriceText
+      ? { source: 'dom', confidence: 0.98 }
+      : jsonLdPrice
+        ? { source: 'json_ld', confidence: 0.95 }
+        : { source: null, confidence: 0 },
+    listingRating: listingRatingFromDom
+      ? { source: 'dom', confidence: 0.9 }
+      : searchItem.rating !== null
+        ? { source: 'search_result', confidence: 0.7 }
+        : { source: null, confidence: 0 },
+    listingReviewCount: searchItem.displayedReviewCount !== null
+      ? { source: 'search_result', confidence: 0.7 }
+      : { source: null, confidence: 0 },
+    description: domDescription
+      ? { source: 'dom', confidence: 0.95 }
+      : { source: null, confidence: 0 },
+    images: imageUrls.length > 0
+      ? { source: 'dom', confidence: 0.95 }
+      : searchItem.imageUrl
+        ? { source: 'search_result', confidence: 0.65 }
+        : { source: null, confidence: 0 },
+  };
 
   // Video
   const hasVideo = $(LISTING_SELECTORS.videoElement).length > 0;
@@ -325,15 +375,13 @@ export function parseListingHtml(html: string, searchItem: SearchResultItem): Li
   const engagementText = $.text();
   const cartsMatch = engagementText.match(/([\d,]+)\s*(?:people|person)\s*have\s*this\s*in\s*their\s*cart/i);
   if (cartsMatch) {
-    cartsCount = parseInt(cartsMatch[1].replace(/,/g, ''), 10);
-    if (!Number.isFinite(cartsCount)) cartsCount = null;
+    cartsCount = parseNumericValue(cartsMatch[1]);
   }
   const favMatch = engagementText.match(
     /(?:([\d,]+)\s*(?:favorite|favorited)|favorited\s+by\s+([\d,]+))/i,
   );
   if (favMatch) {
-    favoritesCount = parseInt((favMatch[1] ?? favMatch[2]).replace(/,/g, ''), 10);
-    if (!Number.isFinite(favoritesCount)) favoritesCount = null;
+    favoritesCount = parseNumericValue(favMatch[1] ?? favMatch[2]);
   }
 
   return {
@@ -372,6 +420,7 @@ export function parseListingHtml(html: string, searchItem: SearchResultItem): Li
     breadcrumbs,
     cartsCount,
     favoritesCount,
+    evidence,
   };
 }
 

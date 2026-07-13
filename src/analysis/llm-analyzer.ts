@@ -77,13 +77,16 @@ interface LlmAnalyzerOptions {
   model?: string;
 }
 
-function buildUserPrompt(listings: EtsyListing[]): string {
-  const payload = listings.map((l) => ({
+export function buildLlmPayload(listings: EtsyListing[]): Array<Record<string, unknown>> {
+  return listings.map((l) => ({
     listingId: l.listingId,
     title: l.title,
     url: l.url,
     price: l.price,
-    rating: l.rating,
+    listingSignals: {
+      rating: l.rating.listingRating,
+      reviewCount: l.rating.listingReviewCount,
+    },
     badges: l.badges,
     engagement: l.engagement,
     content: {
@@ -97,9 +100,25 @@ function buildUserPrompt(listings: EtsyListing[]): string {
       hasVideo: l.media.hasVideo,
     },
     searchPosition: l.searchPosition,
-    salesEstimate: l.salesEstimate,
+    evidence: l.evidence,
+    demandEstimate: {
+      level: l.salesEstimate.level,
+      listingEvidenceScore: l.salesEstimate.listingEvidenceScore,
+      confidence: l.salesEstimate.confidence,
+      reasons: l.salesEstimate.reasons,
+    },
+    shopProxy: {
+      score: l.salesEstimate.shopProxyScore,
+      reasons: l.salesEstimate.shopProxyReasons,
+      shopSales: l.rating.shopSales,
+      shopRating: l.rating.shopRating,
+      shopReviewCount: l.rating.shopReviewCount,
+    },
   }));
+}
 
+export function buildUserPrompt(listings: EtsyListing[]): string {
+  const payload = buildLlmPayload(listings);
   const dataJson = JSON.stringify(payload, null, 2);
   return USER_PROMPT_TEMPLATE.replace('{data}', dataJson);
 }

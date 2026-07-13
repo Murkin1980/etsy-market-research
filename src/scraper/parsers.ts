@@ -1,7 +1,7 @@
 import * as cheerio from 'cheerio';
 import type { SearchResultItem } from '../types/schemas.js';
 import { normalizeUrl, extractListingId } from '../normalization/url.js';
-import { parseNumericValue } from '../normalization/currency.js';
+import { parseLocalizedNumber, parseNumericValue } from '../normalization/currency.js';
 import { SEARCH_SELECTORS, LISTING_SELECTORS } from './selectors.js';
 import { createChildLogger } from '../utils/logger.js';
 
@@ -52,17 +52,17 @@ export function parseSearchPage(
     const ratingEl = $card.find('[class*="star"]');
     if (ratingEl.length) {
       const ariaLabel = ratingEl.attr('aria-label') ?? '';
-      const ratingMatch = ariaLabel.match(/([\d.]+)\s*out\s*of/i) ?? ariaLabel.match(/([\d.]+)/);
+      const ratingMatch = ariaLabel.match(/([\d.,]+)\s*out\s*of/i) ?? ariaLabel.match(/([\d.,]+)/);
       if (ratingMatch) {
-        rating = parseFloat(ratingMatch[1]);
+        rating = parseLocalizedNumber(ratingMatch[1]);
       }
     }
     // Fallback: look for rating in text
     if (rating === null) {
       const ratingText = $card.text();
-      const rtMatch = ratingText.match(/(\d\.\d)\s*(?:out of|stars?)/i);
+      const rtMatch = ratingText.match(/(\d[.,]\d)\s*(?:out of|stars?)/i);
       if (rtMatch) {
-        rating = parseFloat(rtMatch[1]);
+        rating = parseLocalizedNumber(rtMatch[1]);
       }
     }
 

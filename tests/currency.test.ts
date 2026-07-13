@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { parsePrice, parseNumericValue, normalizePrice } from '../src/normalization/currency.js';
+import {
+  clearExchangeRateCache,
+  normalizePrice,
+  parseLocalizedNumber,
+  parseNumericValue,
+  parsePrice,
+  resolveExchangeRate,
+} from '../src/normalization/currency.js';
 
 describe('currency', () => {
   describe('parsePrice', () => {
@@ -48,6 +55,11 @@ describe('currency', () => {
       const result = parsePrice('$1,234');
       expect(result.amount).toBe(1234);
     });
+
+    it('parses European thousands and decimal separators', () => {
+      expect(parsePrice('€1.234,56')).toEqual({ amount: 1234.56, currency: 'EUR' });
+      expect(parsePrice('1\u202f234,56 EUR')).toEqual({ amount: 1234.56, currency: 'EUR' });
+    });
   });
 
   describe('parseNumericValue', () => {
@@ -71,13 +83,51 @@ describe('currency', () => {
     it('returns null for non-numeric text', () => {
       expect(parseNumericValue('abc')).toBeNull();
     });
+
+    it('parses localized compact review counts', () => {
+      expect(parseNumericValue('1,5k')).toBe(1500);
+      expect(parseNumericValue('2.4M')).toBe(2_400_000);
+      expect(parseLocalizedNumber('12\u202f345,7')).toBe(12345.7);
+    });
   });
 
   describe('normalizePrice', () => {
-    it('always stores a real USD amount in amountUsd', async () => {
-      const result = await normalizePrice({ amount: 10, currency: 'EUR' });
+    it('labels static fallback rates instead of presenting them as live dated rates', async () => {
+      clearExchangeRateCache();
+      const result = await normalizePrice(
+        { amount: 10, currency: 'EUR' },
+        { fetchFn: async () => { throw new Error('offline'); } },
+      );
       expect(result.amountUsd).toBe(10.9);
       expect(result.currency).toBe('EUR');
+      expect(result.exchangeRateSource).toBe('fallback');
+      expect(result.exchangeRateDate).toBeNull();
+    });
+
+    it('uses a dated live rate first and then the bounded cache', async () => {
+      clearExchangeRateCache();
+      let calls = 0;
+      const fetchFn: typeof fetch = async () => {
+        calls += 1;
+        return new Response(JSON.stringify({
+          result: 'success',
+          rates: { USD: 1.2 },
+          time_last_update_utc: 'Tue, 14 Jul 2026 00:00:00 +0000',
+        }), { status: 200 });
+      };
+      const options = { fetchFn, now: () => new Date('2026-07-14T01:00:00.000Z') };
+
+      expect(await resolveExchangeRate('EUR', 'USD', options)).toEqual({
+        rate: 1.2,
+        asOf: '2026-07-14T00:00:00.000Z',
+        source: 'live',
+      });
+      expect(await resolveExchangeRate('EUR', 'USD', options)).toEqual({
+        rate: 1.2,
+        asOf: '2026-07-14T00:00:00.000Z',
+        source: 'cache',
+      });
+      expect(calls).toBe(1);
     });
   });
 });
