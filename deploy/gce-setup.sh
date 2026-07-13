@@ -48,7 +48,9 @@ if [ ! -f "$APP_DIR/.env" ]; then
   cp .env.example .env
   echo ""
   echo "!!! Edit $APP_DIR/.env with your settings !!!"
-  echo "Required: ANTHROPIC_API_KEY (if using --use-llm)"
+  echo "Required: API_KEY (HTTP API authentication)"
+  echo "For public access: BIND_ADDRESS=0.0.0.0"
+  echo "Optional: ANTHROPIC_API_KEY or OPENAI_API_KEY for LLM analysis"
   echo ""
 fi
 
@@ -86,6 +88,7 @@ echo "  3. Check:      sudo systemctl status etsy-research"
 echo "  4. Logs:       docker compose -f $APP_DIR/docker-compose.yml logs -f"
 echo "  5. API:        curl http://localhost:3000/health"
 echo ""
+echo "Public firewall access should only be enabled after API_KEY is configured."
 echo "Firewall (allow port 3000):"
-echo "  gcloud compute firewall-rules create allow-etsy-api --allow tcp:3000"
+echo "  gcloud compute firewall-rules create allow-etsy-api --allow tcp:3000 --source-ranges <TRUSTED_CIDR>"
 echo ""

@@ -34,10 +34,11 @@ function slugify(text: string): string {
     .substring(0, 60);
 }
 
-function createRunDir(query: string): string {
+function createRunDir(query: string, runId?: string): string {
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19);
   const slug = slugify(query);
-  const runDir = path.join(config.paths.runs, `${timestamp}_${slug}`);
+  const safeRunId = runId?.replace(/[^a-z0-9_-]+/gi, '-').replace(/^-|-$/g, '');
+  const runDir = path.join(config.paths.runs, `${timestamp}_${slug}${safeRunId ? `_${safeRunId}` : ''}`);
   fs.mkdirSync(runDir, { recursive: true });
   fs.mkdirSync(path.join(runDir, 'raw'), { recursive: true });
   fs.mkdirSync(path.join(runDir, 'reports'), { recursive: true });
@@ -60,6 +61,7 @@ interface CliArgs {
   llmModel: string;
   output: string;
   resume: boolean;
+  runId: string;
 }
 
 function parseArgs(): CliArgs {
@@ -79,6 +81,7 @@ function parseArgs(): CliArgs {
     .option('llm-model', { type: 'string', default: '' })
     .option('output', { type: 'string', default: 'listings-full' })
     .option('resume', { type: 'boolean', default: false })
+    .option('run-id', { type: 'string', default: '', describe: 'Unique run identifier used by the API server' })
     .help()
     .parseSync();
 
@@ -98,6 +101,7 @@ function parseArgs(): CliArgs {
     llmModel: parsed['llm-model'],
     output: parsed.output,
     resume: parsed.resume,
+    runId: parsed['run-id'],
   };
 }
 
@@ -228,7 +232,8 @@ async function main(): Promise<void> {
     'Starting Etsy market research',
   );
 
-  const checkpointManager = new CheckpointManager(undefined, slugify(args.query));
+  const checkpointId = args.runId ? `${slugify(args.query)}-${args.runId}` : slugify(args.query);
+  const checkpointManager = new CheckpointManager(undefined, checkpointId);
   let checkpoint = args.resume ? checkpointManager.load() : null;
   if (checkpoint && checkpoint.query !== args.query) {
     log.warn(
@@ -241,7 +246,7 @@ async function main(): Promise<void> {
   const canResumeRun = Boolean(
     checkpoint?.runDir && fs.existsSync(checkpoint.runDir),
   );
-  const runDir = canResumeRun ? checkpoint!.runDir : createRunDir(args.query);
+  const runDir = canResumeRun ? checkpoint!.runDir : createRunDir(args.query, args.runId);
   const reportsDir = path.join(runDir, 'reports');
   const rawDir = path.join(runDir, 'raw');
   fs.mkdirSync(reportsDir, { recursive: true });

@@ -29,12 +29,20 @@ Key settings:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `ANTHROPIC_API_KEY` | - | Required for LLM analysis |
+| `OPENAI_API_KEY` | - | Required when using the OpenAI provider |
 | `HEADLESS` | `true` | Run browser without UI |
 | `SCRAPER_CONCURRENCY` | `2` | Parallel pages |
 | `SCRAPER_DELAY_MIN_MS` | `2500` | Min delay between requests |
 | `SCRAPER_DELAY_MAX_MS` | `6000` | Max delay between requests |
 | `SCRAPER_TIMEOUT_MS` | `45000` | Page load timeout |
 | `SCRAPER_MAX_RETRIES` | `3` | Max retry attempts |
+| `API_KEY` | - | Bearer token for protected HTTP API routes |
+| `REQUIRE_API_KEY` | production: `true` | Refuse startup when authentication is required but no key is configured |
+| `TRUST_PROXY` | `false` | Trust `X-Forwarded-For` only behind a configured reverse proxy |
+| `CORS_ORIGIN` | - | Optional exact browser origin allowed to call the API |
+| `MAX_REQUEST_BODY_BYTES` | `16384` | Maximum JSON request size |
+| `MAX_QUEUED_JOBS` | `50` | Maximum number of waiting jobs |
+| `MAX_JOBS_RETAINED` | `100` | Completed/failed jobs retained in memory |
 
 ## Usage
 
@@ -161,6 +169,8 @@ npm run dev           # Run with tsx (no build needed)
 
 The tool includes an HTTP API for running research via web requests:
 
+Protected endpoints require `Authorization: Bearer <API_KEY>` when an API key is configured. Production mode refuses to start if `REQUIRE_API_KEY=true` and the key is missing or shorter than 24 characters. Generate a strong key with `openssl rand -hex 32`. `/health` remains public for container health checks.
+
 ```bash
 # Start server
 npm run server
@@ -171,19 +181,36 @@ curl http://localhost:3000/health
 # Start a research job
 curl -X POST http://localhost:3000/jobs \
   -H "Content-Type: application/json" \
-  -d '{"query": "Notion template", "pages": 2, "maxListings": 50}'
+  -H "Authorization: Bearer $API_KEY" \
+  -d '{"query":"Notion template","pages":2,"maxListings":50,"currency":"USD","country":"US","language":"en-US","useLlm":false}'
 
 # Check job status
-curl http://localhost:3000/jobs/job-1
+curl -H "Authorization: Bearer $API_KEY" http://localhost:3000/jobs/<JOB_ID>
 
 # List all jobs
-curl http://localhost:3000/jobs
+curl -H "Authorization: Bearer $API_KEY" http://localhost:3000/jobs
 ```
+
+Accepted job fields:
+
+| Field | Limits | Default |
+|-------|--------|---------|
+| `query` | Required, 1–200 characters | - |
+| `pages` | Integer, 1–10 | `2` |
+| `maxListings` | Integer, 1–500 | `80` |
+| `currency` | Three-letter code | `USD` |
+| `country` | Two-letter code | `US` |
+| `language` | 2–35 characters | `en-US` |
+| `useLlm` | Boolean | `false` |
+| `llmProvider` | `anthropic` or `openai` | `openai` |
+| `llmModel` | Up to 100 characters | Provider default |
 
 ## Docker Deployment
 
 ```bash
 # Build and start
+cp .env.example .env
+# Set a strong API_KEY before starting the production container.
 docker compose up -d
 
 # Check status
@@ -214,7 +241,7 @@ gcloud compute instances create etsy-research \
 ```bash
 gcloud compute firewall-rules create allow-etsy-api \
   --allow tcp:3000 \
-  --source-ranges 0.0.0.0/0 \
+  --source-ranges <TRUSTED_CIDR> \
   --target-tags allow-etsy-api
 ```
 

@@ -4,7 +4,7 @@ services:
     container_name: etsy-research
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "${BIND_ADDRESS:-127.0.0.1}:3000:3000"
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs

@@ -20,7 +20,12 @@ function envBool(key: string, fallback: boolean): boolean {
   return raw.toLowerCase() === 'true' || raw === '1';
 }
 
+const nodeEnv = env('NODE_ENV', 'development');
+const isProduction = nodeEnv === 'production';
+
 export const config = {
+  nodeEnv,
+  isProduction,
   anthropicApiKey: env('ANTHROPIC_API_KEY'),
   openaiApiKey: env('OPENAI_API_KEY'),
   llmProvider: env('LLM_PROVIDER', 'openai') as 'anthropic' | 'openai',
@@ -43,9 +48,15 @@ export const config = {
   },
   server: {
     apiKey: env('API_KEY', ''),
+    requireApiKey: envBool('REQUIRE_API_KEY', isProduction),
+    host: env('SERVER_HOST', isProduction ? '0.0.0.0' : '127.0.0.1'),
+    trustProxy: envBool('TRUST_PROXY', false),
+    corsOrigin: env('CORS_ORIGIN', ''),
     rateLimitPerMinute: envInt('RATE_LIMIT_PER_MINUTE', 10),
     maxConcurrentJobs: envInt('MAX_CONCURRENT_JOBS', 2),
-    maxJobsTotal: envInt('MAX_JOBS_TOTAL', 50),
+    maxQueuedJobs: envInt('MAX_QUEUED_JOBS', 50),
+    maxJobsRetained: envInt('MAX_JOBS_RETAINED', 100),
+    maxRequestBodyBytes: envInt('MAX_REQUEST_BODY_BYTES', 16_384),
   },
   logging: {
     level: env('LOG_LEVEL', 'info'),
