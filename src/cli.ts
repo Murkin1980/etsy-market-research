@@ -278,8 +278,9 @@ async function main(): Promise<void> {
   const browserManager = await createBrowserManager(args.headless);
 
   let searchResults: SearchResultItem[];
+  let searchBlockedCount = 0;
   try {
-    searchResults = await scrapeSearchResults(browserManager, {
+    const searchScrapeResult = await scrapeSearchResults(browserManager, {
       query: args.query,
       pages: args.pages,
       currency: args.currency,
@@ -289,6 +290,8 @@ async function main(): Promise<void> {
       delayMaxMs: args.delayMax,
       timeoutMs: config.scraper.timeoutMs,
     });
+    searchResults = searchScrapeResult.results;
+    searchBlockedCount = searchScrapeResult.blockedCount;
   } finally {
     await browserManager.close();
   }
@@ -306,7 +309,7 @@ async function main(): Promise<void> {
   log.info('=== Phase 2: Deep Listing Scraping ===');
   const listings: EtsyListing[] = [...existingListings];
   const failedListings: FailedListing[] = [...existingFailed];
-  let blockedCount = 0;
+  let blockedCount = searchBlockedCount;
 
   const bm = await createBrowserManager(args.headless);
   const concurrencyLimiter = new ConcurrencyLimiter(args.concurrency);
@@ -521,8 +524,9 @@ async function main(): Promise<void> {
   checkpointManager.clear();
 
   // Write structured result for server to read
+  const searchWasFullyBlocked = searchBlockedCount > 0 && searchResults.length === 0;
   const runResult: RunResult = {
-    status: 'completed',
+    status: searchWasFullyBlocked ? 'failed' : 'completed',
     query: args.query,
     runDir,
     totalFound: searchResults.length,
@@ -533,6 +537,7 @@ async function main(): Promise<void> {
     averagePriceUsd: marketSummary.averagePriceUsd,
     medianPriceUsd: marketSummary.medianPriceUsd,
     durationMs,
+    ...(searchWasFullyBlocked ? { error: 'Etsy blocked search access before results were collected' } : {}),
   };
   writeRunResult(runDir, runResult);
 

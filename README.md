@@ -102,7 +102,7 @@ The API validates body size and fields, limits requests by client IP, caps the j
 ## Quality gates
 
 ```bash
-npm run check       # typecheck + lint + 80 tests + build
+npm run check       # typecheck + lint + 81 tests + build
 npm run smoke:api   # health, auth, and validation smoke test
 npm audit --audit-level=high
 ```

@@ -64,7 +64,7 @@ Status: **Completed**
 ## Release verification
 
 ```text
-npm run check      PASS (typecheck + lint + 80/80 tests + build)
+npm run check      PASS (typecheck + lint + 81/81 tests + build)
 npm run smoke:api  PASS (health + authentication + request validation)
 npm audit          PASS (0 known vulnerabilities)
 live Etsy smoke    COMPLETE (HTTP 403 detected; stopped without bypass)
@@ -80,3 +80,19 @@ All six product stages are complete. Infrastructure work begins from `deploy/GCE
 3. Deploy `v1.0.0`, run remote health checks, and establish a low-volume scheduled workload.
 
 Operational caveat: the current network is blocked by Etsy (HTTP 403). Production access must remain policy-compliant; do not attempt to bypass Etsy controls. Validate access from the deployment environment before enabling scheduled research.
+
+## Stage 7 — Google Cloud production rollout
+
+Status: **In progress**
+
+- [x] Create a dedicated project and attach billing.
+- [x] Add a 75 USD monthly budget with 50%, 80%, and 100% alerts.
+- [x] Create a custom VPC/subnet and restrict SSH to IAP.
+- [x] Create the least-privilege VM service account and remove the default Editor grant.
+- [x] Provision `e2-standard-2`, Ubuntu 24.04, 30 GB balanced disk, static address, Shielded VM, and deletion protection.
+- [x] Store the generated production environment in Secret Manager.
+- [x] Deploy release `v1.0.0` with Docker/systemd and pass the internal API health check.
+- [x] Attach daily snapshots with 14-day retention and install Google Cloud Ops Agent.
+- [ ] Configure domain DNS and HTTPS reverse proxy.
+- [x] Complete controlled remote smoke tests; Etsy blocked both low-volume requests and the scraper stopped without bypass attempts.
+- [ ] Add uptime/notification alerts and deploy the blocked-search result fix.

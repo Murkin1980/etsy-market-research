@@ -19,13 +19,19 @@ export interface SearchScraperOptions {
   timeoutMs: number;
 }
 
+export interface SearchScrapeResult {
+  results: SearchResultItem[];
+  blockedCount: number;
+}
+
 export async function scrapeSearchResults(
   browserManager: BrowserManager,
   options: SearchScraperOptions,
-): Promise<SearchResultItem[]> {
+): Promise<SearchScrapeResult> {
   const { query, pages, currency, country, language, delayMinMs, delayMaxMs, timeoutMs } = options;
   const page = browserManager.getPage();
   const allResults: SearchResultItem[] = [];
+  let blockedCount = 0;
 
   for (let pageNum = 1; pageNum <= pages; pageNum++) {
     const searchUrl = buildSearchUrl(query, pageNum, currency, country, language);
@@ -50,6 +56,7 @@ export async function scrapeSearchResults(
       // Check for blocked page
       const blocked = await browserManager.isBlocked(page);
       if (blocked) {
+        blockedCount++;
         log.error({ page: pageNum }, 'Blocked page detected, stopping search');
         break;
       }
@@ -91,5 +98,5 @@ export async function scrapeSearchResults(
     'Search scraping complete',
   );
 
-  return deduplicated;
+  return { results: deduplicated, blockedCount };
 }
