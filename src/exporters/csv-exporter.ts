@@ -4,6 +4,7 @@ import { createObjectCsvWriter } from 'csv-writer';
 import type { EtsyListing } from '../types/listing.js';
 import { config } from '../config/env.js';
 import { createChildLogger } from '../utils/logger.js';
+import { validateListingsForExport } from './json-exporter.js';
 
 const log = createChildLogger('csv-exporter');
 
@@ -18,6 +19,7 @@ export async function exportListingsCsv(
   filename: string = 'listings-summary.csv',
   outputDir?: string,
 ): Promise<string> {
+  const validatedListings = validateListingsForExport(listings);
   const dir = outputDir ?? config.paths.reports;
   ensureDir(dir);
   const filePath = path.join(dir, filename);
@@ -37,6 +39,8 @@ export async function exportListingsCsv(
       { id: 'shopReviewCount', title: 'Отзывы магазина' },
       { id: 'salesLevel', title: 'Оценка объема продаж' },
       { id: 'salesScore', title: 'Sales Score' },
+      { id: 'listingEvidenceScore', title: 'Listing Evidence Score' },
+      { id: 'shopProxyScore', title: 'Shop Proxy Score' },
       { id: 'confidence', title: 'Confidence' },
       { id: 'mainFeature', title: 'Главная фича' },
       { id: 'bestseller', title: 'Bestseller' },
@@ -48,7 +52,7 @@ export async function exportListingsCsv(
     ],
   });
 
-  const records = listings.map((l) => ({
+  const records = validatedListings.map((l) => ({
     title: l.title ?? '',
     url: l.url,
     shopName: l.shopName ?? '',
@@ -61,6 +65,8 @@ export async function exportListingsCsv(
     shopReviewCount: l.rating.shopReviewCount?.toString() ?? '',
     salesLevel: l.salesEstimate.level,
     salesScore: l.salesEstimate.score.toString(),
+    listingEvidenceScore: l.salesEstimate.listingEvidenceScore.toString(),
+    shopProxyScore: l.salesEstimate.shopProxyScore.toString(),
     confidence: l.salesEstimate.confidence.toString(),
     mainFeature: l.content.mainFeature ?? '',
     bestseller: l.badges.bestseller ? 'Yes' : 'No',

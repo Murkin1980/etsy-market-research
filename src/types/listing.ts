@@ -1,7 +1,26 @@
+export type ExtractionSource =
+  | 'json_ld'
+  | 'embedded_json'
+  | 'dom'
+  | 'text'
+  | 'search_result'
+  | 'llm'
+  | null;
+
 export interface ExtractedValue<T> {
   value: T | null;
-  source: 'json_ld' | 'embedded_json' | 'dom' | 'text' | 'llm' | null;
+  source: ExtractionSource;
   confidence: number;
+}
+
+export interface ListingFieldEvidence {
+  title: Omit<ExtractedValue<string>, 'value'>;
+  shopName: Omit<ExtractedValue<string>, 'value'>;
+  price: Omit<ExtractedValue<number>, 'value'>;
+  listingRating: Omit<ExtractedValue<number>, 'value'>;
+  listingReviewCount: Omit<ExtractedValue<number>, 'value'>;
+  description: Omit<ExtractedValue<string>, 'value'>;
+  images: Omit<ExtractedValue<string[]>, 'value'>;
 }
 
 export interface TextContent {
@@ -18,6 +37,7 @@ export interface PriceData {
   amountUsd: number | null;
   exchangeRate: number | null;
   exchangeRateDate: string | null;
+  exchangeRateSource: 'identity' | 'live' | 'cache' | 'fallback' | null;
 }
 
 export interface ReviewMetrics {
@@ -69,8 +89,11 @@ export type SalesLevel = 'High' | 'Medium' | 'Low' | 'Unknown';
 export interface SalesEstimate {
   level: SalesLevel;
   score: number;
+  listingEvidenceScore: number;
+  shopProxyScore: number;
   confidence: number;
   reasons: string[];
+  shopProxyReasons: string[];
 }
 
 export type ScrapingStatus = 'success' | 'partial' | 'failed' | 'blocked';
@@ -97,6 +120,7 @@ export interface EtsyListing {
   content: ContentData;
   media: MediaData;
   searchPosition: SearchPosition;
+  evidence: ListingFieldEvidence;
   salesEstimate: SalesEstimate;
   scraping: ScrapingMeta;
 }

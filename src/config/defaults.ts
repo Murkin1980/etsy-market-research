@@ -1,5 +1,5 @@
 export const APP_VERSION = '1.0.0';
-export const SCHEMA_VERSION = '1.0.0';
+export const SCHEMA_VERSION = '1.1.0';
 
 export const ETSY_BASE_URL = 'https://www.etsy.com';
 export const ETSY_SEARCH_URL = `${ETSY_BASE_URL}/search`;
@@ -12,6 +12,7 @@ export const TRACKING_PARAMS = new Set([
   'utm_term',
   'ref',
   'click_id',
+  'click_key',
   'gclid',
   'fbclid',
   'msclkid',

@@ -3,288 +3,251 @@ import { spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { config } from './config/env.js';
-import { createChildLogger } from './utils/logger.js';
+import {
+  buildCliParams,
+  getClientIp,
+  parseJsonBody,
+  parseResearchJobRequest,
+  parseRunResultOutput,
+  RequestBodyError,
+  secretsEqual,
+  type RunResultPayload,
+} from './server-api.js';
+import {
+  JobManager,
+  JobQueueFullError,
+  type ResearchJob,
+} from './server-jobs.js';
+import { closeLogStreams, createChildLogger } from './utils/logger.js';
 
 const log = createChildLogger('server');
 
-interface ResearchJob {
-  id: string;
-  query: string;
-  status: 'queued' | 'running' | 'completed' | 'failed';
-  startedAt: string;
-  completedAt?: string;
-  result?: {
-    status: 'completed' | 'failed';
-    query: string;
-    runDir: string;
-    totalFound: number;
-    successCount: number;
-    partialCount: number;
-    failedCount: number;
-    blockedCount: number;
-    averagePriceUsd: number | null;
-    medianPriceUsd: number | null;
-    durationMs: number;
-  };
-  error?: string;
-}
-
-// Job queue
-const jobQueue: ResearchJob[] = [];
-const activeJobs: Set<string> = new Set();
-let jobCounter = 0;
-
-// Rate limiting: IP -> timestamps of recent requests
 const rateLimitMap = new Map<string, number[]>();
 const RATE_WINDOW_MS = 60_000;
+const MAX_CHILD_OUTPUT_BYTES = 1_000_000;
+const MIN_PRODUCTION_API_KEY_LENGTH = 24;
+const activeChildren = new Set<ReturnType<typeof spawn>>();
+let rateLimitChecks = 0;
 
 function checkRateLimit(ip: string): boolean {
   const limit = config.server.rateLimitPerMinute;
   if (limit <= 0) return true;
 
   const now = Date.now();
-  const timestamps = rateLimitMap.get(ip) ?? [];
-  const recent = timestamps.filter((t) => now - t < RATE_WINDOW_MS);
-  if (recent.length >= limit) return false;
+  rateLimitChecks++;
+  if (rateLimitChecks % 1_000 === 0) {
+    for (const [key, timestamps] of rateLimitMap) {
+      const activeTimestamps = timestamps.filter((timestamp) => now - timestamp < RATE_WINDOW_MS);
+      if (activeTimestamps.length === 0) rateLimitMap.delete(key);
+      else rateLimitMap.set(key, activeTimestamps);
+    }
+  }
+
+  const recent = (rateLimitMap.get(ip) ?? []).filter((timestamp) => now - timestamp < RATE_WINDOW_MS);
+  if (recent.length >= limit) {
+    rateLimitMap.set(ip, recent);
+    return false;
+  }
+
   recent.push(now);
   rateLimitMap.set(ip, recent);
   return true;
 }
 
 function checkApiKey(req: http.IncomingMessage): boolean {
-  const requiredKey = config.server.apiKey;
-  if (!requiredKey) return true;
-
-  const authHeader = req.headers['authorization'] ?? '';
+  if (!config.server.apiKey) return !config.server.requireApiKey;
+  const authHeader = req.headers.authorization ?? '';
   const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
-  return token === requiredKey;
+  return secretsEqual(token, config.server.apiKey);
 }
 
-function readRunResult(runDir: string): ResearchJob['result'] | null {
+function readRunResult(runDir: string): RunResultPayload | null {
   const resultPath = path.join(runDir, 'run-result.json');
   if (!fs.existsSync(resultPath)) return null;
   try {
-    return JSON.parse(fs.readFileSync(resultPath, 'utf-8')) as ResearchJob['result'];
+    return parseRunResultOutput(fs.readFileSync(resultPath, 'utf-8'));
   } catch {
     return null;
   }
 }
 
-function processQueue(): void {
-  if (activeJobs.size >= config.server.maxConcurrentJobs) return;
-  if (jobQueue.length === 0) return;
-
-  const job = jobQueue.shift();
-  if (!job) return;
-
-  activeJobs.add(job.id);
-  job.status = 'running';
-
+function executeCliJob(job: ResearchJob): Promise<RunResultPayload> {
   log.info({ jobId: job.id, query: job.query }, 'Starting job');
 
-  const params = [
-    'dist/cli.js',
-    '--query', job.query,
-    '--pages', '2',
-    '--max-listings', '80',
-    '--currency', 'USD',
-    '--country', 'US',
-  ];
+  return new Promise((resolve, reject) => {
+    const child = spawn('node', buildCliParams(job.id, job.request), {
+      cwd: process.cwd(),
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env },
+    });
+    activeChildren.add(child);
 
-  const child = spawn('node', params, {
-    cwd: process.cwd(),
-    stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env },
-  });
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
 
-  let stderr = '';
-  child.stderr.on('data', (data: Buffer) => { stderr += data.toString(); });
+    child.stdout.on('data', (data: Buffer) => {
+      stdout = (stdout + data.toString()).slice(-MAX_CHILD_OUTPUT_BYTES);
+    });
+    child.stderr.on('data', (data: Buffer) => {
+      stderr = (stderr + data.toString()).slice(-MAX_CHILD_OUTPUT_BYTES);
+    });
 
-  child.on('close', (code: number | null) => {
-    activeJobs.delete(job.id);
+    const finish = (code: number | null, spawnError?: Error): void => {
+      if (settled) return;
+      settled = true;
+      activeChildren.delete(child);
 
-    if (code !== 0) {
-      job.status = 'failed';
-      job.completedAt = new Date().toISOString();
-      job.error = `Exit code ${code}: ${stderr.slice(-500)}`;
-      log.error({ jobId: job.id, code }, 'Job failed');
-    } else {
-      // Read run-result.json from the most recent run directory
-      const runsDir = config.paths.runs;
-      if (fs.existsSync(runsDir)) {
-        const runDirs = fs.readdirSync(runsDir)
-          .filter((d) => d.includes(slugify(job.query)))
-          .sort()
-          .reverse();
-
-        if (runDirs.length > 0) {
-          const result = readRunResult(path.join(runsDir, runDirs[0]));
-          if (result) {
-            job.status = 'completed';
-            job.completedAt = new Date().toISOString();
-            job.result = result;
-            log.info({ jobId: job.id }, 'Job completed');
-            processQueue();
-            return;
-          }
-        }
+      if (spawnError || code !== 0) {
+        reject(spawnError ?? new Error(`Exit code ${code}: ${stderr.slice(-500)}`));
+        return;
       }
 
-      // Fallback
-      job.status = 'completed';
-      job.completedAt = new Date().toISOString();
-      job.result = {
-        status: 'completed',
-        query: job.query,
-        runDir: '',
-        totalFound: 0,
-        successCount: 0,
-        partialCount: 0,
-        failedCount: 0,
-        blockedCount: 0,
-        averagePriceUsd: null,
-        medianPriceUsd: null,
-        durationMs: 0,
-      };
-      log.info({ jobId: job.id }, 'Job completed (fallback result)');
-    }
+      const result = parseRunResultOutput(stdout);
+      if (!result) {
+        reject(new Error('CLI completed without a valid structured result'));
+        return;
+      }
+      if (result.status === 'completed') {
+        log.info({ jobId: job.id, runDir: result.runDir }, 'Job completed');
+      } else {
+        log.error({ jobId: job.id, error: result.error }, 'Job returned a failed result');
+      }
+      resolve(result);
+    };
 
-    processQueue();
-  });
-
-  child.on('error', (err: Error) => {
-    activeJobs.delete(job.id);
-    job.status = 'failed';
-    job.completedAt = new Date().toISOString();
-    job.error = err.message;
-    log.error({ jobId: job.id, error: err.message }, 'Job error');
-    processQueue();
+    child.on('close', (code: number | null) => finish(code));
+    child.on('error', (error: Error) => finish(null, error));
   });
 }
 
-function slugify(text: string): string {
-  return text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').substring(0, 60);
-}
-
-function parseBody(req: http.IncomingMessage): Promise<Record<string, unknown>> {
-  return new Promise((resolve, reject) => {
-    let body = '';
-    req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
-    req.on('end', () => {
-      try { resolve(JSON.parse(body)); } catch { reject(new Error('Invalid JSON')); }
-    });
-    req.on('error', reject);
-  });
-}
+const jobManager = new JobManager({
+  maxConcurrent: config.server.maxConcurrentJobs,
+  maxQueued: config.server.maxQueuedJobs,
+  maxRetained: config.server.maxJobsRetained,
+  execute: executeCliJob,
+});
 
 function sendJson(res: http.ServerResponse, status: number, data: unknown): void {
-  res.writeHead(status, { 'Content-Type': 'application/json' });
+  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
   res.end(JSON.stringify(data, null, 2));
 }
 
-function getClientIp(req: http.IncomingMessage): string {
-  return (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() ?? 'local';
+function applyCors(req: http.IncomingMessage, res: http.ServerResponse): void {
+  const configuredOrigin = config.server.corsOrigin;
+  const requestOrigin = req.headers.origin;
+  if (configuredOrigin && (configuredOrigin === '*' || configuredOrigin === requestOrigin)) {
+    res.setHeader('Access-Control-Allow-Origin', configuredOrigin === '*' ? '*' : configuredOrigin);
+    res.setHeader('Vary', 'Origin');
+  }
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 }
 
-const allJobs: ResearchJob[] = [];
+if (config.server.requireApiKey && !config.server.apiKey) {
+  throw new Error('API_KEY must be configured when REQUIRE_API_KEY=true');
+}
+if (config.server.requireApiKey && config.server.apiKey.length < MIN_PRODUCTION_API_KEY_LENGTH) {
+  throw new Error(`API_KEY must contain at least ${MIN_PRODUCTION_API_KEY_LENGTH} characters`);
+}
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
-  const ip = getClientIp(req);
+  applyCors(req, res);
 
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204);
+    res.end();
+    return;
+  }
 
-  // Auth check
+  if (url.pathname === '/favicon.ico') {
+    res.writeHead(204);
+    res.end();
+    return;
+  }
+
+  if (url.pathname === '/' || url.pathname === '/health') {
+    const jobStats = jobManager.stats();
+    sendJson(res, 200, {
+      status: 'ok',
+      version: '1.0.0',
+      uptime: process.uptime(),
+      activeJobs: jobStats.active,
+      queuedJobs: jobStats.queued,
+      retainedJobs: jobStats.retained,
+      maxConcurrent: config.server.maxConcurrentJobs,
+      maxQueued: config.server.maxQueuedJobs,
+    });
+    return;
+  }
+
   if (!checkApiKey(req)) {
     sendJson(res, 401, { error: 'Unauthorized. Provide Authorization: Bearer <API_KEY>' });
     return;
   }
 
-  // Rate limit
+  const ip = getClientIp(req, config.server.trustProxy);
   if (!checkRateLimit(ip)) {
-    sendJson(res, 429, { error: 'Rate limit exceeded', limit: config.server.rateLimitPerMinute, window: '60s' });
-    return;
-  }
-
-  // Health
-  if (url.pathname === '/' || url.pathname === '/health') {
-    sendJson(res, 200, {
-      status: 'ok',
-      version: '1.0.0',
-      uptime: process.uptime(),
-      activeJobs: activeJobs.size,
-      queuedJobs: jobQueue.length,
-      totalJobs: allJobs.length,
-      maxConcurrent: config.server.maxConcurrentJobs,
-      maxTotal: config.server.maxJobsTotal,
+    sendJson(res, 429, {
+      error: 'Rate limit exceeded',
+      limit: config.server.rateLimitPerMinute,
+      window: '60s',
     });
     return;
   }
 
-  // List jobs
   if (url.pathname === '/jobs' && req.method === 'GET') {
-    sendJson(res, 200, { jobs: allJobs, total: allJobs.length });
+    const jobs = jobManager.list();
+    sendJson(res, 200, { jobs, total: jobs.length });
     return;
   }
 
-  // Create job
   if (url.pathname === '/jobs' && req.method === 'POST') {
     try {
-      const body = await parseBody(req);
-      const query = body.query as string | undefined;
-      if (!query) { sendJson(res, 400, { error: 'query is required' }); return; }
+      const body = await parseJsonBody(req, config.server.maxRequestBodyBytes);
+      const request = parseResearchJobRequest(body);
+      const { job, queuePosition } = jobManager.enqueue(request);
+      log.info({ jobId: job.id, query: job.query }, 'Job queued');
 
-      if (allJobs.length >= config.server.maxJobsTotal) {
-        sendJson(res, 429, { error: 'Max jobs limit reached', max: config.server.maxJobsTotal });
-        return;
+      sendJson(res, 202, {
+        jobId: job.id,
+        status: job.status,
+        ...(queuePosition > 0 ? { queuePosition } : {}),
+      });
+    } catch (error) {
+      if (error instanceof JobQueueFullError) {
+        sendJson(res, 429, { error: 'Job queue is full', maxQueued: error.maxQueued });
+      } else if (error instanceof RequestBodyError) {
+        sendJson(res, error.statusCode, { error: error.message, details: error.details });
+      } else {
+        log.error({ error: (error as Error).message }, 'Failed to create job');
+        sendJson(res, 500, { error: 'Failed to create job' });
       }
-
-      const runningCount = allJobs.filter((j) => j.status === 'running' || j.status === 'queued').length;
-      if (runningCount >= config.server.maxConcurrentJobs) {
-        sendJson(res, 202, { message: 'Job queued (all slots busy)', queuePosition: jobQueue.length + 1 });
-      }
-
-      jobCounter++;
-      const job: ResearchJob = {
-        id: `job-${jobCounter}`,
-        query,
-        status: 'queued',
-        startedAt: new Date().toISOString(),
-      };
-      allJobs.push(job);
-      jobQueue.push(job);
-
-      log.info({ jobId: job.id, query }, 'Job queued');
-      processQueue();
-
-      sendJson(res, 202, { jobId: job.id, status: 'queued' });
-    } catch (err) {
-      sendJson(res, 500, { error: (err as Error).message });
     }
     return;
   }
 
-  // Get job
   if (url.pathname.startsWith('/jobs/') && req.method === 'GET') {
     const jobId = url.pathname.split('/')[2];
-    const job = allJobs.find((j) => j.id === jobId);
-    if (!job) { sendJson(res, 404, { error: 'Job not found' }); return; }
+    const job = jobManager.get(jobId);
+    if (!job) {
+      sendJson(res, 404, { error: 'Job not found' });
+      return;
+    }
     sendJson(res, 200, job);
     return;
   }
 
-  // List runs
   if (url.pathname === '/runs' && req.method === 'GET') {
     const runsDir = config.paths.runs;
-    if (!fs.existsSync(runsDir)) { sendJson(res, 200, { runs: [] }); return; }
-    const dirs = fs.readdirSync(runsDir).filter((d) => !d.startsWith('.'));
-    const runs = dirs.map((d) => {
-      const result = readRunResult(path.join(runsDir, d));
-      return { id: d, ...result };
-    });
+    if (!fs.existsSync(runsDir)) {
+      sendJson(res, 200, { runs: [] });
+      return;
+    }
+    const runs = fs.readdirSync(runsDir)
+      .filter((directory) => !directory.startsWith('.'))
+      .map((directory) => ({ id: directory, ...readRunResult(path.join(runsDir, directory)) }));
     sendJson(res, 200, { runs, total: runs.length });
     return;
   }
@@ -292,15 +255,40 @@ const server = http.createServer(async (req, res) => {
   sendJson(res, 404, { error: 'Not found' });
 });
 
-const PORT = parseInt(process.env.PORT ?? '3000', 10);
-server.listen(PORT, '0.0.0.0', () => {
-  log.info({ port: PORT }, 'Etsy Research API started');
-  console.log(`Etsy Research API on http://0.0.0.0:${PORT}`);
+const port = Number.parseInt(process.env.PORT ?? '3000', 10);
+server.listen(port, config.server.host, () => {
+  log.info({ host: config.server.host, port }, 'Etsy Research API started');
+  console.log(`Etsy Research API on http://${config.server.host}:${port}`);
   console.log('Endpoints:');
-  console.log('  GET  /health           - Health check');
+  console.log('  GET  /health           - Health check (public)');
   console.log('  GET  /jobs             - List jobs');
-  console.log('  POST /jobs             - Create job {query, pages?, maxListings?}');
+  console.log('  POST /jobs             - Create a validated research job');
   console.log('  GET  /jobs/:id         - Job status');
   console.log('  GET  /runs             - List completed runs');
   if (config.server.apiKey) console.log('  Auth: Authorization: Bearer <API_KEY>');
 });
+
+let shuttingDown = false;
+function shutdown(signal: string): void {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  log.info({ signal, activeJobs: activeChildren.size }, 'Graceful shutdown started');
+  for (const child of activeChildren) child.kill('SIGTERM');
+
+  server.close((error) => {
+    if (error) {
+      log.error({ error: error.message }, 'HTTP server shutdown failed');
+      process.exitCode = 1;
+    }
+    closeLogStreams();
+  });
+  server.closeIdleConnections();
+
+  setTimeout(() => {
+    log.error('Graceful shutdown timed out');
+    process.exit(1);
+  }, 10_000).unref();
+}
+
+process.once('SIGTERM', () => shutdown('SIGTERM'));
+process.once('SIGINT', () => shutdown('SIGINT'));

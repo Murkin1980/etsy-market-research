@@ -2,21 +2,23 @@ import { SALES_SCORE_CONFIG } from '../config/defaults.js';
 import type { SalesEstimate, EtsyListing } from '../types/listing.js';
 
 export function calculateSalesScore(listing: EtsyListing): SalesEstimate {
-  let score = 0;
+  let listingEvidenceScore = 0;
+  let shopProxyScore = 0;
   const reasons: string[] = [];
+  const shopProxyReasons: string[] = [];
   const cfg = SALES_SCORE_CONFIG;
 
   // Listing review count
   const reviewCount = listing.rating.listingReviewCount;
   if (reviewCount !== null) {
     if (reviewCount >= 200) {
-      score += cfg.listingReviewCount['200+'];
+      listingEvidenceScore += cfg.listingReviewCount['200+'];
       reasons.push(`High listing review count: ${reviewCount}`);
     } else if (reviewCount >= 50) {
-      score += cfg.listingReviewCount['50-199'];
+      listingEvidenceScore += cfg.listingReviewCount['50-199'];
       reasons.push(`Good listing review count: ${reviewCount}`);
     } else if (reviewCount >= 10) {
-      score += cfg.listingReviewCount['10-49'];
+      listingEvidenceScore += cfg.listingReviewCount['10-49'];
       reasons.push(`Moderate listing review count: ${reviewCount}`);
     } else {
       reasons.push(`Low listing review count: ${reviewCount}`);
@@ -29,35 +31,41 @@ export function calculateSalesScore(listing: EtsyListing): SalesEstimate {
   const shopSales = listing.rating.shopSales;
   if (shopSales !== null) {
     if (shopSales >= 5000) {
-      score += cfg.shopSales['5000+'];
-      reasons.push(`High shop sales: ${shopSales.toLocaleString()}`);
+      shopProxyScore += cfg.shopSales['5000+'];
+      shopProxyReasons.push(`High shop sales proxy: ${shopSales.toLocaleString()}`);
     } else if (shopSales >= 500) {
-      score += cfg.shopSales['500-4999'];
-      reasons.push(`Moderate shop sales: ${shopSales.toLocaleString()}`);
+      shopProxyScore += cfg.shopSales['500-4999'];
+      shopProxyReasons.push(`Moderate shop sales proxy: ${shopSales.toLocaleString()}`);
     } else {
-      reasons.push(`Low shop sales: ${shopSales.toLocaleString()}`);
+      shopProxyReasons.push(`Low shop sales proxy: ${shopSales.toLocaleString()}`);
     }
   } else {
-    reasons.push('Shop sales count not available');
+    shopProxyReasons.push('Shop sales proxy not available');
   }
 
   // Bestseller badge
   if (listing.badges.bestseller) {
-    score += cfg.bestsellerBonus;
+    listingEvidenceScore += cfg.bestsellerBonus;
     reasons.push('Has bestseller badge');
   }
 
   // Popular Now
   if (listing.badges.popularNow) {
-    score += cfg.popularNowBonus;
+    listingEvidenceScore += cfg.popularNowBonus;
     reasons.push('Has popular now badge');
   }
 
   // High rating
-  const rating = listing.rating.listingRating ?? listing.rating.shopRating;
+  const rating = listing.rating.listingRating;
   if (rating !== null && rating >= cfg.highRatingThreshold) {
-    score += cfg.highRatingBonus;
+    listingEvidenceScore += cfg.highRatingBonus;
     reasons.push(`High rating: ${rating}`);
+  }
+
+  const shopRating = listing.rating.shopRating;
+  if (shopRating !== null && shopRating >= cfg.highRatingThreshold) {
+    shopProxyScore += cfg.highRatingBonus;
+    shopProxyReasons.push(`High shop rating proxy: ${shopRating}`);
   }
 
   // Top organic position
@@ -65,7 +73,7 @@ export function calculateSalesScore(listing: EtsyListing): SalesEstimate {
     !listing.badges.ad &&
     listing.searchPosition.position <= cfg.topPositionThreshold
   ) {
-    score += cfg.topPositionBonus;
+    listingEvidenceScore += cfg.topPositionBonus;
     reasons.push(`Top ${cfg.topPositionThreshold} organic position (#${listing.searchPosition.position})`);
   }
 
@@ -99,9 +107,9 @@ export function calculateSalesScore(listing: EtsyListing): SalesEstimate {
 
   // Determine level
   let level: SalesEstimate['level'] = 'Unknown';
-  if (score >= cfg.levels.high.min) {
+  if (listingEvidenceScore >= cfg.levels.high.min) {
     level = 'High';
-  } else if (score >= cfg.levels.medium.min) {
+  } else if (listingEvidenceScore >= cfg.levels.medium.min) {
     level = 'Medium';
   } else {
     level = 'Low';
@@ -110,7 +118,6 @@ export function calculateSalesScore(listing: EtsyListing): SalesEstimate {
   // Confidence based on data availability
   let confidence = 0.3; // base
   if (reviewCount !== null) confidence += 0.15;
-  if (shopSales !== null) confidence += 0.15;
   if (listing.badges.bestseller) confidence += 0.1;
   if (listing.engagement.cartsCount !== null) confidence += 0.1;
   if (rating !== null) confidence += 0.05;
@@ -119,9 +126,12 @@ export function calculateSalesScore(listing: EtsyListing): SalesEstimate {
 
   return {
     level,
-    score,
+    score: listingEvidenceScore,
+    listingEvidenceScore,
+    shopProxyScore,
     confidence: Math.round(confidence * 100) / 100,
     reasons,
+    shopProxyReasons,
   };
 }
 
@@ -129,13 +139,21 @@ export function calculateMarketSummary(listings: EtsyListing[]): {
   averagePriceUsd: number | null;
   medianPriceUsd: number | null;
   totalAnalyzed: number;
+  pricedListings: number;
+  priceCoverage: number;
 } {
   const prices = listings
     .map((l) => l.price.amountUsd)
     .filter((p): p is number => p !== null && p > 0);
 
   if (prices.length === 0) {
-    return { averagePriceUsd: null, medianPriceUsd: null, totalAnalyzed: listings.length };
+    return {
+      averagePriceUsd: null,
+      medianPriceUsd: null,
+      totalAnalyzed: listings.length,
+      pricedListings: 0,
+      priceCoverage: 0,
+    };
   }
 
   const averagePriceUsd =
@@ -152,5 +170,7 @@ export function calculateMarketSummary(listings: EtsyListing[]): {
     averagePriceUsd,
     medianPriceUsd: Math.round(medianPriceUsd * 100) / 100,
     totalAnalyzed: listings.length,
+    pricedListings: prices.length,
+    priceCoverage: Math.round((prices.length / listings.length) * 100) / 100,
   };
 }

@@ -27,7 +27,23 @@ export const PriceDataSchema = z.object({
   amountUsd: z.number().nullable(),
   exchangeRate: z.number().nullable(),
   exchangeRateDate: z.string().nullable(),
+  exchangeRateSource: z.enum(['identity', 'live', 'cache', 'fallback']).nullable().default(null),
 });
+
+const FieldEvidenceSchema = z.object({
+  source: z.enum(['json_ld', 'embedded_json', 'dom', 'text', 'search_result', 'llm']).nullable(),
+  confidence: z.number().min(0).max(1),
+});
+
+const UnknownListingEvidence = {
+  title: { source: null, confidence: 0 },
+  shopName: { source: null, confidence: 0 },
+  price: { source: null, confidence: 0 },
+  listingRating: { source: null, confidence: 0 },
+  listingReviewCount: { source: null, confidence: 0 },
+  description: { source: null, confidence: 0 },
+  images: { source: null, confidence: 0 },
+} as const;
 
 export const ReviewMetricsSchema = z.object({
   listingRating: z.number().nullable(),
@@ -78,12 +94,28 @@ export const EtsyListingSchema = z.object({
     page: z.number(),
     position: z.number(),
   }),
+  evidence: z.object({
+    title: FieldEvidenceSchema,
+    shopName: FieldEvidenceSchema,
+    price: FieldEvidenceSchema,
+    listingRating: FieldEvidenceSchema,
+    listingReviewCount: FieldEvidenceSchema,
+    description: FieldEvidenceSchema,
+    images: FieldEvidenceSchema,
+  }).default(UnknownListingEvidence),
   salesEstimate: z.object({
     level: z.enum(['High', 'Medium', 'Low', 'Unknown']),
     score: z.number(),
+    listingEvidenceScore: z.number().optional(),
+    shopProxyScore: z.number().optional(),
     confidence: z.number(),
     reasons: z.array(z.string()),
-  }),
+    shopProxyReasons: z.array(z.string()).default([]),
+  }).transform((estimate) => ({
+    ...estimate,
+    listingEvidenceScore: estimate.listingEvidenceScore ?? estimate.score,
+    shopProxyScore: estimate.shopProxyScore ?? 0,
+  })),
   scraping: z.object({
     status: z.enum(['success', 'partial', 'failed', 'blocked']),
     scrapedAt: z.string(),

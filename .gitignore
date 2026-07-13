@@ -6,4 +6,6 @@ data/normalized/
 data/reports/
 data/checkpoints/
 logs/
+output/
+.playwright-cli/
 *.tsbuildinfo

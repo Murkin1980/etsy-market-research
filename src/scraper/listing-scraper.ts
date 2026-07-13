@@ -1,11 +1,12 @@
 import type { SearchResultItem } from '../types/schemas.js';
 import { LISTING_SELECTORS } from './selectors.js';
 import { createChildLogger } from '../utils/logger.js';
-import { withRetry } from '../utils/retry.js';
+import { RetryError, withRetry } from '../utils/retry.js';
 import { normalizeUrl } from '../normalization/url.js';
 import type { BrowserManager } from './browser.js';
 import * as cheerio from 'cheerio';
-import type { ErrorType } from '../types/listing.js';
+import type { ErrorType, ListingFieldEvidence } from '../types/listing.js';
+import { parseLocalizedNumber, parseNumericValue, parsePrice } from '../normalization/currency.js';
 
 const log = createChildLogger('listing-scraper');
 
@@ -22,7 +23,7 @@ export interface ListingScrapeResult {
     rawText: string | null;
     amount: number | null;
     currency: string | null;
-    originalPrice: string | null;
+    originalPrice: number | null;
     discountPercent: number | null;
   };
   listingRating: number | null;
@@ -49,6 +50,16 @@ export interface ListingScrapeResult {
   breadcrumbs: string[];
   cartsCount: number | null;
   favoritesCount: number | null;
+  evidence: ListingFieldEvidence;
+}
+
+export function classifyScrapeError(error: Error): ErrorType {
+  const rootError = error instanceof RetryError ? error.lastError : error;
+  if (rootError.message.includes('CAPTCHA')) return 'CAPTCHA';
+  if (rootError.message.includes('BLOCKED')) return 'BLOCKED';
+  if (/timeout/i.test(rootError.message)) return 'TIMEOUT';
+  if (rootError.message.includes('net::ERR')) return 'HTTP_ERROR';
+  return 'UNKNOWN';
 }
 
 export async function scrapeListing(
@@ -57,7 +68,7 @@ export async function scrapeListing(
   timeoutMs: number,
   maxRetries: number,
 ): Promise<{ result: ListingScrapeResult | null; errorType: ErrorType | null; error: string | null }> {
-  const page = browserManager.getPage();
+  const page = await browserManager.createPage();
 
   try {
     const html = await withRetry(
@@ -69,9 +80,9 @@ export async function scrapeListing(
         await page.waitForTimeout(2000);
 
         // Check for blocked
-        const blocked = await browserManager.isBlocked(page);
-        if (blocked) {
-          throw new Error('BLOCKED');
+        const blockReason = await browserManager.getBlockReason(page);
+        if (blockReason) {
+          throw new Error(blockReason);
         }
 
         return page.content();
@@ -80,24 +91,16 @@ export async function scrapeListing(
       searchItem.url,
     );
 
-    const blocked = await browserManager.isBlocked(page);
-    if (blocked) {
-      return { result: null, errorType: 'BLOCKED', error: 'Page blocked by Etsy' };
+    const blockReason = await browserManager.getBlockReason(page);
+    if (blockReason) {
+      return { result: null, errorType: blockReason, error: `Page rejected: ${blockReason}` };
     }
 
     const result = parseListingHtml(html, searchItem);
     return { result, errorType: null, error: null };
   } catch (err) {
     const error = err instanceof Error ? err : new Error(String(err));
-    let errorType: ErrorType = 'UNKNOWN';
-
-    if (error.message === 'BLOCKED') {
-      errorType = 'BLOCKED';
-    } else if (error.message.includes('Timeout')) {
-      errorType = 'TIMEOUT';
-    } else if (error.message.includes('net::ERR')) {
-      errorType = 'HTTP_ERROR';
-    }
+    const errorType = classifyScrapeError(error);
 
     log.error(
       { url: searchItem.url, errorType, message: error.message },
@@ -105,10 +108,12 @@ export async function scrapeListing(
     );
 
     return { result: null, errorType, error: error.message };
+  } finally {
+    await page.close().catch(() => undefined);
   }
 }
 
-function parseListingHtml(html: string, searchItem: SearchResultItem): ListingScrapeResult {
+export function parseListingHtml(html: string, searchItem: SearchResultItem): ListingScrapeResult {
   const $ = cheerio.load(html);
 
   // Extract JSON-LD
@@ -136,16 +141,20 @@ function parseListingHtml(html: string, searchItem: SearchResultItem): ListingSc
   });
 
   // Title
+  const domTitle = $(LISTING_SELECTORS.title).first().text().trim();
+  const jsonLdTitle = extractFromJsonLd(jsonLdData, 'name');
   const title =
-    $(LISTING_SELECTORS.title).first().text().trim() ||
-    extractFromJsonLd(jsonLdData, 'name') ||
+    domTitle ||
+    jsonLdTitle ||
     searchItem.titlePreview ||
     null;
 
   // Shop
+  const domShopName = $(LISTING_SELECTORS.shopName).first().text().trim();
+  const jsonLdShopName = extractFromJsonLd(jsonLdData, 'seller', 'name');
   const shopName =
-    $(LISTING_SELECTORS.shopName).first().text().trim() ||
-    extractFromJsonLd(jsonLdData, 'seller', 'name') ||
+    domShopName ||
+    jsonLdShopName ||
     searchItem.shopName ||
     null;
 
@@ -155,9 +164,11 @@ function parseListingHtml(html: string, searchItem: SearchResultItem): ListingSc
     : null;
 
   // Price
+  const domPriceText = $(LISTING_SELECTORS.priceValue).first().text().trim();
+  const jsonLdPrice = extractFromJsonLd(jsonLdData, 'offers', 'price');
   const priceRawText =
-    $(LISTING_SELECTORS.priceValue).first().text().trim() ||
-    extractFromJsonLd(jsonLdData, 'offers', 'price') ||
+    domPriceText ||
+    jsonLdPrice ||
     null;
 
   const originalPriceText =
@@ -167,32 +178,28 @@ function parseListingHtml(html: string, searchItem: SearchResultItem): ListingSc
   let amount: number | null = null;
   let currency: string | null = null;
   if (priceRawText) {
-    const cleaned = priceRawText.replace(/[^\d.,]/g, '').replace(',', '.');
-    amount = parseFloat(cleaned);
-    if (!Number.isFinite(amount)) amount = null;
+    const parsedPrice = parsePrice(priceRawText);
+    amount = parsedPrice.amount;
 
     // Try to get currency from JSON-LD
     currency = extractFromJsonLd(jsonLdData, 'offers', 'priceCurrency') as string | null;
-    if (!currency && priceRawText) {
-      if (priceRawText.includes('$')) currency = 'USD';
-      else if (priceRawText.includes('€')) currency = 'EUR';
-      else if (priceRawText.includes('£')) currency = 'GBP';
-    }
+    currency ??= parsedPrice.currency;
   }
 
   // Discount
   let discountPercent: number | null = null;
+  let originalPrice: number | null = null;
   if (originalPriceText && amount) {
-    const origCleaned = originalPriceText.replace(/[^\d.,]/g, '').replace(',', '.');
-    const origAmount = parseFloat(origCleaned);
-    if (Number.isFinite(origAmount) && origAmount > 0) {
-      discountPercent = Math.round(((origAmount - amount) / origAmount) * 100);
+    originalPrice = parsePrice(originalPriceText).amount;
+    if (originalPrice !== null && originalPrice > 0) {
+      discountPercent = Math.round(((originalPrice - amount) / originalPrice) * 100);
     }
   }
 
   // Rating — listing-specific
-  let listingRating: number | null = null;
-  const listingReviewCount: number | null = null;
+  let listingRating: number | null = searchItem.rating;
+  let listingRatingFromDom = false;
+  const listingReviewCount: number | null = searchItem.displayedReviewCount;
 
   // Try to find listing-specific review section
   const reviewSection = $('[id*="reviews"], [class*="review"]');
@@ -201,8 +208,11 @@ function parseListingHtml(html: string, searchItem: SearchResultItem): ListingSc
     const ratingEl = reviewSection.find('[class*="star"], [aria-label*="star"]').first();
     if (ratingEl.length) {
       const ariaLabel = ratingEl.attr('aria-label') ?? '';
-      const match = ariaLabel.match(/([\d.]+)/);
-      if (match) listingRating = parseFloat(match[1]);
+      const match = ariaLabel.match(/([\d.,]+)/);
+      if (match) {
+        listingRating = parseLocalizedNumber(match[1]);
+        listingRatingFromDom = true;
+      }
     }
   }
 
@@ -216,17 +226,18 @@ function parseListingHtml(html: string, searchItem: SearchResultItem): ListingSc
     return $(el).text().toLowerCase().includes('sale');
   }).first().text();
   if (salesText) {
-    const salesMatch = salesText.match(/([\d,]+)/);
+    const salesMatch = salesText.match(/([\d,.\s\u00a0\u202f]+(?:k|m|к|м|тыс\.?|млн\.?)?)/iu);
     if (salesMatch) {
-      shopSales = parseInt(salesMatch[1].replace(/,/g, ''), 10);
-      if (!Number.isFinite(shopSales)) shopSales = null;
+      shopSales = parseNumericValue(salesMatch[1]);
     }
   }
 
   // Description
-  const descriptionRaw =
+  const domDescription =
     $(LISTING_SELECTORS.fullDescription).text().trim() ||
-    $(LISTING_SELECTORS.description).text().trim() ||
+    $(LISTING_SELECTORS.description).text().trim();
+  const descriptionRaw =
+    domDescription ||
     null;
 
   // Features — look for bullet points or feature lists
@@ -275,6 +286,44 @@ function parseListingHtml(html: string, searchItem: SearchResultItem): ListingSc
     }
   });
   const mainImageUrl = imageUrls[0] ?? searchItem.imageUrl ?? null;
+
+  const evidence: ListingFieldEvidence = {
+    title: domTitle
+      ? { source: 'dom', confidence: 0.98 }
+      : jsonLdTitle
+        ? { source: 'json_ld', confidence: 0.95 }
+        : searchItem.titlePreview
+          ? { source: 'search_result', confidence: 0.7 }
+          : { source: null, confidence: 0 },
+    shopName: domShopName
+      ? { source: 'dom', confidence: 0.95 }
+      : jsonLdShopName
+        ? { source: 'json_ld', confidence: 0.9 }
+        : searchItem.shopName
+          ? { source: 'search_result', confidence: 0.65 }
+          : { source: null, confidence: 0 },
+    price: domPriceText
+      ? { source: 'dom', confidence: 0.98 }
+      : jsonLdPrice
+        ? { source: 'json_ld', confidence: 0.95 }
+        : { source: null, confidence: 0 },
+    listingRating: listingRatingFromDom
+      ? { source: 'dom', confidence: 0.9 }
+      : searchItem.rating !== null
+        ? { source: 'search_result', confidence: 0.7 }
+        : { source: null, confidence: 0 },
+    listingReviewCount: searchItem.displayedReviewCount !== null
+      ? { source: 'search_result', confidence: 0.7 }
+      : { source: null, confidence: 0 },
+    description: domDescription
+      ? { source: 'dom', confidence: 0.95 }
+      : { source: null, confidence: 0 },
+    images: imageUrls.length > 0
+      ? { source: 'dom', confidence: 0.95 }
+      : searchItem.imageUrl
+        ? { source: 'search_result', confidence: 0.65 }
+        : { source: null, confidence: 0 },
+  };
 
   // Video
   const hasVideo = $(LISTING_SELECTORS.videoElement).length > 0;
@@ -326,13 +375,13 @@ function parseListingHtml(html: string, searchItem: SearchResultItem): ListingSc
   const engagementText = $.text();
   const cartsMatch = engagementText.match(/([\d,]+)\s*(?:people|person)\s*have\s*this\s*in\s*their\s*cart/i);
   if (cartsMatch) {
-    cartsCount = parseInt(cartsMatch[1].replace(/,/g, ''), 10);
-    if (!Number.isFinite(cartsCount)) cartsCount = null;
+    cartsCount = parseNumericValue(cartsMatch[1]);
   }
-  const favMatch = engagementText.match(/([\d,]+)\s*(?:favorite|favorited)/i);
+  const favMatch = engagementText.match(
+    /(?:([\d,]+)\s*(?:favorite|favorited)|favorited\s+by\s+([\d,]+))/i,
+  );
   if (favMatch) {
-    favoritesCount = parseInt(favMatch[1].replace(/,/g, ''), 10);
-    if (!Number.isFinite(favoritesCount)) favoritesCount = null;
+    favoritesCount = parseNumericValue(favMatch[1] ?? favMatch[2]);
   }
 
   return {
@@ -348,7 +397,7 @@ function parseListingHtml(html: string, searchItem: SearchResultItem): ListingSc
       rawText: priceRawText,
       amount,
       currency,
-      originalPrice: originalPriceText,
+      originalPrice,
       discountPercent,
     },
     listingRating,
@@ -371,6 +420,7 @@ function parseListingHtml(html: string, searchItem: SearchResultItem): ListingSc
     breadcrumbs,
     cartsCount,
     favoritesCount,
+    evidence,
   };
 }
 

@@ -2,17 +2,18 @@ import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import { config } from './config/env.js';
 import { APP_VERSION, SCHEMA_VERSION } from './config/defaults.js';
-import { createBrowserManager } from './scraper/browser.js';
+import { closeBrowser, createBrowserManager } from './scraper/browser.js';
 import { scrapeSearchResults } from './scraper/search-scraper.js';
 import { scrapeListing } from './scraper/listing-scraper.js';
 import type { ListingScrapeResult } from './scraper/listing-scraper.js';
+import { evaluateScrapeCompleteness } from './scraper/scrape-quality.js';
 import { calculateSalesScore, calculateMarketSummary } from './analysis/scoring.js';
 import { extractFeatures, extractMarketFeatures } from './analysis/feature-extractor.js';
 import { LlmAnalyzer } from './analysis/llm-analyzer.js';
 import { normalizePrice } from './normalization/currency.js';
 import { normalizeUrl } from './normalization/url.js';
 import { cleanText } from './normalization/text-cleaner.js';
-import { exportListingsJson, exportMarketAnalysis, exportFailedListings, exportRunMetadata } from './exporters/json-exporter.js';
+import { exportListingsJson, exportMarketAnalysis, exportFailedListings, exportRunMetadata, validateListingsForExport } from './exporters/json-exporter.js';
 import { exportListingsCsv } from './exporters/csv-exporter.js';
 import { CheckpointManager } from './storage/checkpoint.js';
 import { randomDelay } from './utils/delay.js';
@@ -34,10 +35,11 @@ function slugify(text: string): string {
     .substring(0, 60);
 }
 
-function createRunDir(query: string): string {
+function createRunDir(query: string, runId?: string): string {
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19);
   const slug = slugify(query);
-  const runDir = path.join(config.paths.runs, `${timestamp}_${slug}`);
+  const safeRunId = runId?.replace(/[^a-z0-9_-]+/gi, '-').replace(/^-|-$/g, '');
+  const runDir = path.join(config.paths.runs, `${timestamp}_${slug}${safeRunId ? `_${safeRunId}` : ''}`);
   fs.mkdirSync(runDir, { recursive: true });
   fs.mkdirSync(path.join(runDir, 'raw'), { recursive: true });
   fs.mkdirSync(path.join(runDir, 'reports'), { recursive: true });
@@ -60,6 +62,7 @@ interface CliArgs {
   llmModel: string;
   output: string;
   resume: boolean;
+  runId: string;
 }
 
 function parseArgs(): CliArgs {
@@ -79,6 +82,7 @@ function parseArgs(): CliArgs {
     .option('llm-model', { type: 'string', default: '' })
     .option('output', { type: 'string', default: 'listings-full' })
     .option('resume', { type: 'boolean', default: false })
+    .option('run-id', { type: 'string', default: '', describe: 'Unique run identifier used by the API server' })
     .help()
     .parseSync();
 
@@ -98,13 +102,13 @@ function parseArgs(): CliArgs {
     llmModel: parsed['llm-model'],
     output: parsed.output,
     resume: parsed.resume,
+    runId: parsed['run-id'],
   };
 }
 
 async function buildListingFromScrapeResult(
   scrapeResult: ListingScrapeResult,
   searchItem: SearchResultItem,
-  targetCurrency: string,
 ): Promise<EtsyListing> {
   const sr = scrapeResult as ListingScrapeResult;
 
@@ -116,24 +120,16 @@ async function buildListingFromScrapeResult(
     sr.title,
   );
 
-  const missingFields: string[] = [];
-  if (!sr.title) missingFields.push('title');
-  if (sr.price.amount === null) missingFields.push('price');
-  if (sr.descriptionRaw === null) missingFields.push('description');
-  if (sr.imageUrls.length === 0) missingFields.push('images');
-
-  let scrapingStatus: EtsyListing['scraping']['status'] = 'success';
-  if (missingFields.length > 2) scrapingStatus = 'partial';
+  const { missingFields, status: scrapingStatus } = evaluateScrapeCompleteness(sr);
 
   const normalizedPrice = await normalizePrice(
     {
       rawText: sr.price.rawText,
       amount: sr.price.amount,
       currency: sr.price.currency,
-      originalPrice: null,
+      originalPrice: sr.price.originalPrice,
       discountPercent: sr.price.discountPercent,
     },
-    targetCurrency,
   );
 
   const listing: EtsyListing = {
@@ -183,11 +179,15 @@ async function buildListingFromScrapeResult(
       page: searchItem.page,
       position: searchItem.position,
     },
+    evidence: sr.evidence,
     salesEstimate: {
       level: 'Unknown',
       score: 0,
+      listingEvidenceScore: 0,
+      shopProxyScore: 0,
       confidence: 0,
       reasons: [],
+      shopProxyReasons: [],
     },
     scraping: {
       status: scrapingStatus,
@@ -230,26 +230,42 @@ async function main(): Promise<void> {
     'Starting Etsy market research',
   );
 
-  const runDir = createRunDir(args.query);
+  const checkpointId = args.runId ? `${slugify(args.query)}-${args.runId}` : slugify(args.query);
+  const checkpointManager = new CheckpointManager(undefined, checkpointId);
+  let checkpoint = args.resume ? checkpointManager.load() : null;
+  if (checkpoint && checkpoint.query !== args.query) {
+    log.warn(
+      { expectedQuery: args.query, checkpointQuery: checkpoint.query },
+      'Ignoring checkpoint created for a different query',
+    );
+    checkpoint = null;
+  }
+
+  const canResumeRun = Boolean(
+    checkpoint?.runDir && fs.existsSync(checkpoint.runDir),
+  );
+  const runDir = canResumeRun ? checkpoint!.runDir : createRunDir(args.query, args.runId);
   const reportsDir = path.join(runDir, 'reports');
   const rawDir = path.join(runDir, 'raw');
+  fs.mkdirSync(reportsDir, { recursive: true });
+  fs.mkdirSync(rawDir, { recursive: true });
+  const outputName = canResumeRun ? checkpoint!.outputName : args.output;
 
-  log.info({ runDir }, 'Run directory created');
+  log.info({ runDir, resumed: canResumeRun }, canResumeRun ? 'Run directory resumed' : 'Run directory created');
 
-  const checkpointManager = new CheckpointManager();
-  let checkpoint = args.resume ? checkpointManager.load() : null;
-  if (args.resume && checkpoint) {
+  if (args.resume && canResumeRun && checkpoint) {
     log.info({ processed: checkpoint.processedUrls.length }, 'Resuming from checkpoint');
   }
 
   // Load existing results for resume merge
   let existingListings: EtsyListing[] = [];
   let existingFailed: FailedListing[] = [];
-  if (args.resume) {
-    const existingListingsPath = path.join(config.paths.reports, `${args.output}.json`);
-    const existingFailedPath = path.join(config.paths.reports, 'failed-listings.json');
+  if (args.resume && canResumeRun) {
+    const existingListingsPath = path.join(reportsDir, `${outputName}.json`);
+    const existingFailedPath = path.join(reportsDir, 'failed-listings.json');
     if (fs.existsSync(existingListingsPath)) {
-      existingListings = JSON.parse(fs.readFileSync(existingListingsPath, 'utf-8')) as EtsyListing[];
+      const storedListings = JSON.parse(fs.readFileSync(existingListingsPath, 'utf-8')) as EtsyListing[];
+      existingListings = validateListingsForExport(storedListings);
       log.info({ count: existingListings.length }, 'Loaded existing listings for merge');
     }
     if (fs.existsSync(existingFailedPath)) {
@@ -298,33 +314,99 @@ async function main(): Promise<void> {
   // Sliding window for error tracking
   const errorWindow: boolean[] = [];
   const windowSize = 10;
+  let completedCount = 0;
+  let processedSinceCheckpoint = 0;
+
+  const ensureCheckpoint = (): NonNullable<typeof checkpoint> => {
+    checkpoint ??= {
+      processedUrls: [],
+      successfulUrls: [],
+      failedUrls: [],
+      timestamp: '',
+      query: args.query,
+      runDir,
+      outputName,
+    };
+    return checkpoint;
+  };
+
+  const persistProgress = (): void => {
+    if (!checkpoint) return;
+    try {
+      checkpointManager.save(checkpoint);
+      fs.writeFileSync(
+        path.join(reportsDir, `${outputName}.json`),
+        JSON.stringify(listings, null, 2),
+        'utf-8',
+      );
+      fs.writeFileSync(
+        path.join(reportsDir, 'failed-listings.json'),
+        JSON.stringify(failedListings, null, 2),
+        'utf-8',
+      );
+      processedSinceCheckpoint = 0;
+    } catch (err) {
+      log.error({ error: (err as Error).message }, 'Failed to persist resumable progress');
+    }
+  };
+
+  const recordFailure = (
+    searchItem: SearchResultItem,
+    errorType: FailedListing['errorType'],
+    message: string,
+  ): void => {
+    failedListings.push({
+      url: searchItem.url,
+      listingId: searchItem.listingId,
+      errorType,
+      message,
+      attempts: config.scraper.maxRetries + 1,
+      timestamp: new Date().toISOString(),
+    });
+
+    const currentCheckpoint = ensureCheckpoint();
+    currentCheckpoint.processedUrls.push(searchItem.url);
+    currentCheckpoint.failedUrls.push(searchItem.url);
+  };
+
+  const updateErrorWindow = (failed: boolean): void => {
+    errorWindow.push(failed);
+    if (errorWindow.length > windowSize) errorWindow.shift();
+  };
+
+  const logProgress = (): void => {
+    const remaining = searchResults.length - completedCount;
+    log.info(
+      { completed: completedCount, remaining, success: listings.length, failed: failedListings.length },
+      `Progress: ${completedCount}/${searchResults.length} (${remaining} remaining)`,
+    );
+  };
 
   try {
-    for (let i = 0; i < searchResults.length; i++) {
-      const searchItem = searchResults[i];
-
+    const tasks = searchResults.map(async (searchItem, i) => {
       if (checkpoint && checkpointManager.isUrlProcessed(searchItem.url, checkpoint)) {
         log.debug({ url: searchItem.url }, 'Skipping already processed URL');
-        continue;
+        completedCount++;
+        logProgress();
+        return;
       }
-
-      // Sliding window adaptive concurrency
-      if (errorWindow.length >= windowSize) {
-        const errorRate = errorWindow.filter(Boolean).length / windowSize;
-        if (errorRate > 0.3) {
-          concurrencyLimiter.reduce();
-          log.warn({ errorRate, concurrency: concurrencyLimiter.limit }, 'Reducing concurrency');
-        }
-      }
-
-      log.info(
-        { index: i + 1, total: searchResults.length, url: searchItem.url },
-        `Processing listing ${i + 1}/${searchResults.length}`,
-      );
 
       await concurrencyLimiter.acquire();
 
       try {
+        if (errorWindow.length >= windowSize) {
+          const errorRate = errorWindow.filter(Boolean).length / windowSize;
+          if (errorRate > 0.3 && concurrencyLimiter.limit > 1) {
+            concurrencyLimiter.reduce();
+            log.warn({ errorRate, concurrency: concurrencyLimiter.limit }, 'Reducing concurrency');
+          }
+        }
+
+        log.info(
+          { index: i + 1, total: searchResults.length, url: searchItem.url },
+          `Processing listing ${i + 1}/${searchResults.length}`,
+        );
+
         const { result, errorType, error } = await scrapeListing(
           bm,
           searchItem,
@@ -333,34 +415,22 @@ async function main(): Promise<void> {
         );
 
         if (result) {
-          const listing = await buildListingFromScrapeResult(result, searchItem, args.currency);
+          const listing = await buildListingFromScrapeResult(result, searchItem);
           listings.push(listing);
 
-          if (!checkpoint) {
-            checkpoint = { processedUrls: [], successfulUrls: [], failedUrls: [], timestamp: '', query: args.query };
-          }
-          checkpoint.processedUrls.push(searchItem.url);
-          checkpoint.successfulUrls.push(searchItem.url);
+          const currentCheckpoint = ensureCheckpoint();
+          currentCheckpoint.processedUrls.push(searchItem.url);
+          currentCheckpoint.successfulUrls.push(searchItem.url);
 
-          errorWindow.push(false);
-          if (errorWindow.length > windowSize) errorWindow.shift();
+          updateErrorWindow(false);
 
           log.info(
             { title: listing.title?.substring(0, 50), salesLevel: listing.salesEstimate.level },
             `Scraped: ${listing.title?.substring(0, 50) ?? 'unknown'}`,
           );
         } else {
-          failedListings.push({
-            url: searchItem.url,
-            listingId: searchItem.listingId,
-            errorType: errorType ?? 'UNKNOWN',
-            message: error ?? 'Unknown error',
-            attempts: config.scraper.maxRetries + 1,
-            timestamp: new Date().toISOString(),
-          });
-
-          errorWindow.push(true);
-          if (errorWindow.length > windowSize) errorWindow.shift();
+          recordFailure(searchItem, errorType ?? 'UNKNOWN', error ?? 'Unknown error');
+          updateErrorWindow(true);
 
           if (errorType === 'BLOCKED') {
             blockedCount++;
@@ -368,33 +438,33 @@ async function main(): Promise<void> {
             concurrencyLimiter.reduce();
             await randomDelay(10000, 20000);
           }
-
-          if (!checkpoint) {
-            checkpoint = { processedUrls: [], successfulUrls: [], failedUrls: [], timestamp: '', query: args.query };
-          }
-          checkpoint.processedUrls.push(searchItem.url);
-          checkpoint.failedUrls.push(searchItem.url);
         }
+      } catch (err) {
+        const error = err instanceof Error ? err : new Error(String(err));
+        recordFailure(searchItem, 'UNKNOWN', error.message);
+        updateErrorWindow(true);
+        log.error({ url: searchItem.url, error: error.message }, 'Unexpected listing processing failure');
       } finally {
+        processedSinceCheckpoint++;
+        completedCount++;
         concurrencyLimiter.release();
-      }
-
-      if (checkpoint && (i + 1) % config.checkpoint.interval === 0) {
-        checkpointManager.save(checkpoint);
+        if (processedSinceCheckpoint >= config.checkpoint.interval) {
+          persistProgress();
+        }
+        logProgress();
       }
 
       if (i < searchResults.length - 1) {
         await randomDelay(args.delayMin, args.delayMax);
       }
+    });
 
-      const processed = i + 1;
-      const remaining = searchResults.length - processed;
-      log.info(
-        { processed, remaining, success: listings.length, failed: failedListings.length },
-        `Progress: ${processed}/${searchResults.length} (${remaining} remaining)`,
-      );
-    }
+    await Promise.all(tasks);
+    listings.sort(
+      (a, b) => a.searchPosition.page - b.searchPosition.page || a.searchPosition.position - b.searchPosition.position,
+    );
   } finally {
+    if (processedSinceCheckpoint > 0) persistProgress();
     await bm.close();
   }
 
@@ -424,8 +494,8 @@ async function main(): Promise<void> {
   log.info('=== Phase 4: Export ===');
   const durationMs = Date.now() - startTime;
 
-  exportListingsJson(listings, `${args.output}.json`, reportsDir);
-  await exportListingsCsv(listings, `${args.output.replace('-full', '-summary')}.csv`, reportsDir);
+  exportListingsJson(listings, `${outputName}.json`, reportsDir);
+  await exportListingsCsv(listings, `${outputName.replace('-full', '-summary')}.csv`, reportsDir);
   exportFailedListings(failedListings, 'failed-listings.json', reportsDir);
 
   if (llmAnalysis) {
@@ -473,22 +543,26 @@ async function main(): Promise<void> {
   log.info({ ...runResult, runDir }, 'Summary');
 }
 
-main().catch((err) => {
-  log.fatal({ error: (err as Error).message }, 'Fatal error');
-  const failResult: RunResult = {
-    status: 'failed',
-    query: process.argv.find((a) => a === '--query') ? process.argv[process.argv.indexOf('--query') + 1] : 'unknown',
-    runDir: '',
-    totalFound: 0,
-    successCount: 0,
-    partialCount: 0,
-    failedCount: 0,
-    blockedCount: 0,
-    averagePriceUsd: null,
-    medianPriceUsd: null,
-    durationMs: 0,
-    error: (err as Error).message,
-  };
-  console.log(JSON.stringify(failResult));
-  process.exit(1);
-});
+main()
+  .catch((err) => {
+    log.fatal({ error: (err as Error).message }, 'Fatal error');
+    const failResult: RunResult = {
+      status: 'failed',
+      query: process.argv.find((a) => a === '--query') ? process.argv[process.argv.indexOf('--query') + 1] : 'unknown',
+      runDir: '',
+      totalFound: 0,
+      successCount: 0,
+      partialCount: 0,
+      failedCount: 0,
+      blockedCount: 0,
+      averagePriceUsd: null,
+      medianPriceUsd: null,
+      durationMs: 0,
+      error: (err as Error).message,
+    };
+    console.log(JSON.stringify(failResult));
+    process.exitCode = 1;
+  })
+  .finally(async () => {
+    await closeBrowser();
+  });
