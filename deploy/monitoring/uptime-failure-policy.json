@@ -1,0 +1,34 @@
+{
+  "displayName": "Etsy HTTPS uptime failure",
+  "combiner": "OR",
+  "enabled": true,
+  "conditions": [
+    {
+      "displayName": "HTTPS health check fails from multiple regions",
+      "conditionThreshold": {
+        "filter": "resource.type=\"uptime_url\" AND metric.type=\"monitoring.googleapis.com/uptime_check/check_passed\" AND metric.label.check_id=\"etsy-production-https-health-cPPnrykXyCQ\"",
+        "aggregations": [
+          {
+            "alignmentPeriod": "300s",
+            "perSeriesAligner": "ALIGN_NEXT_OLDER",
+            "crossSeriesReducer": "REDUCE_COUNT_FALSE"
+          }
+        ],
+        "comparison": "COMPARISON_GT",
+        "thresholdValue": 1,
+        "duration": "60s",
+        "trigger": {
+          "count": 1
+        }
+      }
+    }
+  ],
+  "documentation": {
+    "content": "The public HTTPS health endpoint failed from more than one monitoring region. Check Caddy and etsy-research on the production VM.",
+    "mimeType": "text/markdown"
+  },
+  "userLabels": {
+    "environment": "production",
+    "service": "etsy"
+  }
+}
