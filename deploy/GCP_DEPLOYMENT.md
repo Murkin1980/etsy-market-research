@@ -18,6 +18,9 @@ Deployment started on 2026-07-14. This document records resource names and opera
 | Snapshot policy | `etsy-daily-snapshots` (daily, 14 days) |
 | Monthly budget | 75 USD; alerts at 50%, 80%, and 100% |
 | Monitoring | Ops Agent plus `Etsy VM high CPU` alert policy |
+| Public hostname | `34-18-107-101.sslip.io` |
+| TLS proxy | Caddy with automatic certificate renewal |
+| Uptime check | `Etsy Production HTTPS Health` (three regions, every minute) |
 
 ## Security state
 
@@ -28,6 +31,7 @@ Deployment started on 2026-07-14. This document records resource names and opera
 - OS Login is enabled and the default Compute Engine service account has no Editor role.
 - The dedicated VM service account can write logs/metrics and access only the production environment secret.
 - The application container runs as non-root UID/GID 1001.
+- HTTP redirects permanently to HTTPS; HSTS, no-sniff, frame-deny, and referrer-policy headers are set by Caddy.
 
 ## Deployment
 
@@ -61,6 +65,12 @@ gcloud compute ssh etsy-research-prod `
   --command="curl --fail --silent http://127.0.0.1:3000/health"
 ```
 
+Public HTTPS health check:
+
+```bash
+curl --fail --silent https://34-18-107-101.sslip.io/health
+```
+
 Service and container status:
 
 ```bash
@@ -89,8 +99,16 @@ gcloud monitoring policies create `
 
 The checked-in policy intentionally excludes notification destinations and credentials.
 
+Install the checked-in Caddy configuration:
+
+```bash
+sudo install -o root -g root -m 0644 deploy/caddy/Caddyfile /etc/caddy/Caddyfile
+sudo caddy validate --config /etc/caddy/Caddyfile
+sudo systemctl reload caddy
+```
+
+The current sslip.io hostname is suitable for the initial rollout and can later be replaced with an owned domain by changing the first line of the Caddyfile.
+
 ## Remaining rollout
 
-1. Point a domain A record at the reserved address.
-2. Install/configure Caddy and verify automatic TLS on ports 80/443.
-3. Configure a public HTTPS uptime check against `/health`.
+The Google Cloud production rollout is complete. A future owned domain can replace the temporary sslip.io hostname without changing the application container.

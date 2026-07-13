@@ -83,7 +83,7 @@ Operational caveat: the current network is blocked by Etsy (HTTP 403). Productio
 
 ## Stage 7 — Google Cloud production rollout
 
-Status: **In progress**
+Status: **Completed**
 
 - [x] Create a dedicated project and attach billing.
 - [x] Add a 75 USD monthly budget with 50%, 80%, and 100% alerts.
@@ -93,8 +93,8 @@ Status: **In progress**
 - [x] Store the generated production environment in Secret Manager.
 - [x] Deploy release `v1.0.0` with Docker/systemd and pass the internal API health check.
 - [x] Attach daily snapshots with 14-day retention and install Google Cloud Ops Agent.
-- [ ] Configure domain DNS and HTTPS reverse proxy.
+- [x] Configure `34-18-107-101.sslip.io`, Caddy automatic TLS, security headers, and HTTP-to-HTTPS redirect.
 - [x] Complete controlled remote smoke tests; Etsy blocked both low-volume requests and the scraper stopped without bypass attempts.
 - [x] Deploy the blocked-search result fix and verify production reports `blockedCount=1` with a failed run status.
 - [x] Add a production email notification channel and a high-CPU alert policy.
-- [ ] Add a public HTTPS uptime check after the domain is connected.
+- [x] Add a public HTTPS `/health` uptime check from three regions with email failure notification.
