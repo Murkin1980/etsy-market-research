@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [master, "agent/**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Quality (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - run: npm run smoke:api
+      - run: npm audit --audit-level=high
+
+  container-smoke:
+    name: Container smoke
+    runs-on: ubuntu-latest
+    needs: quality
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build --tag etsy-market-research:ci .
+      - name: Start container
+        run: >-
+          docker run --detach --name etsy-market-research-ci
+          --publish 127.0.0.1:3000:3000
+          --env NODE_ENV=production
+          --env REQUIRE_API_KEY=true
+          --env API_KEY=ci-smoke-key-at-least-32-characters
+          etsy-market-research:ci
+      - name: Verify health
+        run: |
+          for attempt in {1..30}; do
+            curl --fail --silent http://127.0.0.1:3000/health && exit 0
+            sleep 2
+          done
+          docker logs etsy-market-research-ci
+          exit 1
+      - if: always()
+        run: docker rm --force etsy-market-research-ci

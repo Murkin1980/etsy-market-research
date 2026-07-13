@@ -18,7 +18,7 @@ import {
   JobQueueFullError,
   type ResearchJob,
 } from './server-jobs.js';
-import { createChildLogger } from './utils/logger.js';
+import { closeLogStreams, createChildLogger } from './utils/logger.js';
 
 const log = createChildLogger('server');
 
@@ -26,6 +26,7 @@ const rateLimitMap = new Map<string, number[]>();
 const RATE_WINDOW_MS = 60_000;
 const MAX_CHILD_OUTPUT_BYTES = 1_000_000;
 const MIN_PRODUCTION_API_KEY_LENGTH = 24;
+const activeChildren = new Set<ReturnType<typeof spawn>>();
 let rateLimitChecks = 0;
 
 function checkRateLimit(ip: string): boolean {
@@ -79,6 +80,7 @@ function executeCliJob(job: ResearchJob): Promise<RunResultPayload> {
       stdio: ['ignore', 'pipe', 'pipe'],
       env: { ...process.env },
     });
+    activeChildren.add(child);
 
     let stdout = '';
     let stderr = '';
@@ -94,6 +96,7 @@ function executeCliJob(job: ResearchJob): Promise<RunResultPayload> {
     const finish = (code: number | null, spawnError?: Error): void => {
       if (settled) return;
       settled = true;
+      activeChildren.delete(child);
 
       if (spawnError || code !== 0) {
         reject(spawnError ?? new Error(`Exit code ${code}: ${stderr.slice(-500)}`));
@@ -264,3 +267,28 @@ server.listen(port, config.server.host, () => {
   console.log('  GET  /runs             - List completed runs');
   if (config.server.apiKey) console.log('  Auth: Authorization: Bearer <API_KEY>');
 });
+
+let shuttingDown = false;
+function shutdown(signal: string): void {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  log.info({ signal, activeJobs: activeChildren.size }, 'Graceful shutdown started');
+  for (const child of activeChildren) child.kill('SIGTERM');
+
+  server.close((error) => {
+    if (error) {
+      log.error({ error: error.message }, 'HTTP server shutdown failed');
+      process.exitCode = 1;
+    }
+    closeLogStreams();
+  });
+  server.closeIdleConnections();
+
+  setTimeout(() => {
+    log.error('Graceful shutdown timed out');
+    process.exit(1);
+  }, 10_000).unref();
+}
+
+process.once('SIGTERM', () => shutdown('SIGTERM'));
+process.once('SIGINT', () => shutdown('SIGINT'));

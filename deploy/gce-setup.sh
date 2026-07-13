@@ -1,75 +1,48 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -euo pipefail
 
-# Google Cloud Engine setup script for Etsy Market Research tool
-# Run this on a fresh Ubuntu 22.04/24.04 LTS VM
+# Bootstrap a fresh Ubuntu 24.04 LTS VM after network, OS Login, and IAP are configured.
+APP_DIR="/opt/etsy-research"
+REPOSITORY="https://github.com/Murkin1980/etsy-market-research.git"
 
-echo "=== Etsy Research Tool - GCE Setup ==="
-
-# Update system
-sudo apt-get update && sudo apt-get upgrade -y
-
-# Install Docker
-if ! command -v docker &> /dev/null; then
-  echo "Installing Docker..."
-  curl -fsSL https://get.docker.com | sudo sh
-  sudo usermod -aG docker $USER
-  echo "Docker installed. You may need to log out and back in for group changes."
-fi
-
-# Install Docker Compose
-if ! command -v docker compose &> /dev/null; then
-  echo "Installing Docker Compose..."
+sudo apt-get update
+sudo DEBIAN_FRONTEND=noninteractive apt-get upgrade -y
+sudo apt-get install -y ca-certificates git docker.io
+if ! sudo apt-get install -y docker-compose-v2; then
   sudo apt-get install -y docker-compose-plugin
 fi
+sudo systemctl enable --now docker
 
-# Install git
-if ! command -v git &> /dev/null; then
-  sudo apt-get install -y git
-fi
-
-# Create app directory
-APP_DIR="/opt/etsy-research"
 sudo mkdir -p "$APP_DIR"
-sudo chown $USER:$USER "$APP_DIR"
+sudo chown "$(id -u):$(id -g)" "$APP_DIR"
 
-# Clone repo (or pull latest if already exists)
 if [ -d "$APP_DIR/.git" ]; then
-  echo "Pulling latest changes..."
-  cd "$APP_DIR" && git pull
+  git -C "$APP_DIR" pull --ff-only
 else
-  echo "Cloning repository..."
-  git clone https://github.com/Murkin1980/etsy-market-research.git "$APP_DIR"
-  cd "$APP_DIR"
+  git clone "$REPOSITORY" "$APP_DIR"
 fi
 
-# Create .env from template if not exists
 if [ ! -f "$APP_DIR/.env" ]; then
-  cp .env.example .env
-  echo ""
-  echo "!!! Edit $APP_DIR/.env with your settings !!!"
-  echo "Required: API_KEY (HTTP API authentication)"
-  echo "For public access: BIND_ADDRESS=0.0.0.0"
-  echo "Optional: ANTHROPIC_API_KEY or OPENAI_API_KEY for LLM analysis"
-  echo ""
+  cp "$APP_DIR/.env.example" "$APP_DIR/.env"
 fi
+chmod 600 "$APP_DIR/.env"
 
-# Create systemd service
-sudo tee /etc/systemd/system/etsy-research.service > /dev/null <<EOF
+sudo tee /etc/systemd/system/etsy-research.service >/dev/null <<EOF
 [Unit]
 Description=Etsy Market Research API
-After=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
 Requires=docker.service
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
 WorkingDirectory=$APP_DIR
-ExecStartPre=/usr/bin/docker compose pull
-ExecStart=/usr/bin/docker compose up -d
+ExecStartPre=/usr/bin/docker compose config --quiet
+ExecStart=/usr/bin/docker compose up -d --build --remove-orphans
 ExecStop=/usr/bin/docker compose down
-ExecReload=/usr/bin/docker compose restart
-TimeoutStartSec=300
+TimeoutStartSec=600
+TimeoutStopSec=60
 
 [Install]
 WantedBy=multi-user.target
@@ -78,17 +51,9 @@ EOF
 sudo systemctl daemon-reload
 sudo systemctl enable etsy-research
 
-echo ""
-echo "=== Setup Complete ==="
-echo ""
-echo "Next steps:"
-echo "  1. Edit .env:  nano $APP_DIR/.env"
-echo "  2. Start:      sudo systemctl start etsy-research"
-echo "  3. Check:      sudo systemctl status etsy-research"
-echo "  4. Logs:       docker compose -f $APP_DIR/docker-compose.yml logs -f"
-echo "  5. API:        curl http://localhost:3000/health"
-echo ""
-echo "Public firewall access should only be enabled after API_KEY is configured."
-echo "Firewall (allow port 3000):"
-echo "  gcloud compute firewall-rules create allow-etsy-api --allow tcp:3000 --source-ranges <TRUSTED_CIDR>"
-echo ""
+echo "Bootstrap complete. Before starting:"
+echo "  1. Set a 32+ character API_KEY in $APP_DIR/.env"
+echo "  2. Keep BIND_ADDRESS=127.0.0.1"
+echo "  3. Configure HTTPS reverse proxy/load balancer"
+echo "  4. Start: sudo systemctl start etsy-research"
+echo "  5. Verify: curl http://127.0.0.1:3000/health"

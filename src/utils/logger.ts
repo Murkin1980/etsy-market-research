@@ -35,3 +35,10 @@ export const errorLogger = pino(
 export function createChildLogger(name: string) {
   return logger.child({ module: name });
 }
+
+export function closeLogStreams(): void {
+  appLogStream.flushSync();
+  errorLogStream.flushSync();
+  appLogStream.end();
+  errorLogStream.end();
+}

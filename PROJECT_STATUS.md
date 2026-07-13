@@ -10,96 +10,73 @@ Build a reliable Etsy market-research pipeline that collects search and listing 
 
 Status: **Completed**
 
-- [x] Repository cloned and working tree verified.
-- [x] TypeScript typecheck passes.
-- [x] Production build passes.
-- [x] 45 unit tests pass.
-- [x] Direct ESLint run passes.
-- [x] npm dependency audit reports zero known vulnerabilities.
+- [x] Repository, build, tests, lint, and dependencies audited.
 - [x] Critical correctness, security, reliability, and documentation gaps documented.
 
 ## Stage 2 — Critical correctness fixes
 
 Status: **Completed**
 
-- [x] Prevent duplicate HTTP responses when jobs are queued.
-- [x] Make `--concurrency` perform actual parallel work safely.
-- [x] Repair checkpoint/resume result merging and query isolation.
-- [x] Keep USD values semantically correct regardless of Etsy display currency.
-- [x] Correct thousands-separator parsing in listing prices.
-- [x] Reuse search-result rating and review data when listing-level values are unavailable.
-- [x] Add regression tests for corrected data, checkpoint, and concurrency defects.
-
-Exit criteria:
-
-- Critical regression tests pass.
-- No processed listing disappears after resume.
-- Currency and review signals remain internally consistent.
-- API queueing returns exactly one response per request.
+- [x] Fixed duplicate API responses and implemented bounded parallel listing work.
+- [x] Repaired checkpoint/resume merging and query isolation.
+- [x] Corrected currency, thousands separators, and fallback review signals.
+- [x] Added regression tests for each corrected defect.
 
 ## Stage 3 — HTTP API security and job isolation
 
 Status: **Completed**
 
-- [x] Validate request bodies with a strict Zod schema and enforce size limits.
-- [x] Require authentication for production deployment and fail closed without `API_KEY`.
-- [x] Make proxy/IP handling explicit so forwarding headers are ignored by default.
-- [x] Give every job a UUID and dedicated output/checkpoint paths.
-- [x] Apply requested `pages`, `maxListings`, currency, country, language, and LLM options.
-- [x] Add bounded queue capacity and completed-job retention.
-- [x] Associate results directly with child-process output instead of scanning the newest matching directory.
-- [x] Bind Docker to localhost by default and require an explicit public bind address.
+- [x] Added strict request schemas, body limits, bearer authentication, and fail-closed production startup.
+- [x] Made trusted-proxy behavior explicit and rate limited by validated client IP.
+- [x] Added UUID job isolation, bounded queues, retained-job limits, and structured child-process results.
+- [x] Bound Docker publication to localhost by default.
 
 ## Stage 4 — Browser lifecycle and integration reliability
 
 Status: **Completed**
 
-- [x] Close Chromium cleanly after CLI jobs and failures.
-- [x] Use isolated pages or contexts for concurrent listing work.
-- [x] Add saved Etsy-like HTML fixtures and parser integration tests.
-- [x] Add API job lifecycle tests without live Etsy access.
-- [x] Verify retry, timeout, blocked-page, CAPTCHA, and partial-result behavior.
-- [x] Deduplicate nested search-card matches and remove Etsy `click_key` tracking data.
-- [x] Complete a local Chromium smoke test against the API health endpoint.
+- [x] Closed Chromium on success/failure and isolated concurrent browser work.
+- [x] Added Etsy-like HTML fixtures, integration tests, and API lifecycle tests.
+- [x] Verified timeout, retry, block/CAPTCHA, and partial-result behavior.
+- [x] Removed duplicate nested cards and Etsy tracking parameters.
 
 ## Stage 5 — Data quality and market analysis
 
 Status: **Completed**
 
-- [x] Separate listing evidence from shop-level proxy signals in scoring.
-- [x] Record extraction source and confidence for important fields.
-- [x] Improve locale-aware number, price, rating, and review parsing.
-- [x] Replace static-first exchange rates with a dated live-provider/cache policy and labeled fallback.
-- [x] Validate JSON and CSV listing exports with Zod before writing reports.
-- [x] Upgrade legacy stage-4 listings during resume/export validation.
-- [x] Add deterministic tests for scoring, summaries, exchange rates, exports, and LLM payload construction.
+- [x] Separated listing evidence from shop-level proxy signals.
+- [x] Recorded extraction source/confidence and improved locale-aware parsing.
+- [x] Added dated exchange-rate provider/cache/fallback provenance.
+- [x] Versioned and validated JSON/CSV exports and upgraded legacy checkpoint data.
+- [x] Added deterministic scoring, summary, rate, export, and LLM payload tests.
 
 ## Stage 6 — Documentation, deployment, and release
 
-Status: **Pending**
+Status: **Completed**
 
-- [ ] Make README output paths and supported API parameters match the code.
-- [ ] Make npm scripts cross-platform.
-- [ ] Harden Docker and GCE defaults.
-- [ ] Add CI for typecheck, lint, tests, build, and container smoke checks.
-- [ ] Run a controlled live smoke test against Etsy within documented limits.
-- [ ] Publish a tagged release with reproducible verification commands.
+- [x] Synced README paths, behavior, API fields, and verification commands with the implementation.
+- [x] Made npm commands cross-platform and added a production API smoke command.
+- [x] Hardened the non-root Docker image/Compose runtime and documented the GCE production profile.
+- [x] Added Linux/Windows CI and a production-container health smoke check.
+- [x] Ran one controlled live Etsy request. Etsy returned HTTP 403/block detection; the test stopped without retries or bypass attempts.
+- [x] Prepared release `v1.0.0` with reproducible quality gates.
 
-## Current verification
+## Release verification
 
 ```text
-npm run typecheck  PASS
-npm test           PASS (80/80)
-npm run build      PASS
-npm run lint       PASS
+npm run check      PASS (typecheck + lint + 80/80 tests + build)
+npm run smoke:api  PASS (health + authentication + request validation)
 npm audit          PASS (0 known vulnerabilities)
-browser smoke      PASS (local Chromium + /health, no console errors)
+live Etsy smoke    COMPLETE (HTTP 403 detected; stopped without bypass)
+container smoke    AUTOMATED IN CI (Docker unavailable on this workstation)
 ```
 
-## Current known high-priority risks
+## Next phase — Google Cloud infrastructure
 
-1. README output paths and API parameter documentation need a release pass.
-2. npm scripts still need explicit cross-platform verification.
-3. Docker and GCE deployment defaults need a final hardening review.
-4. CI and container smoke tests are not yet automated in GitHub Actions.
-5. A controlled, documented live Etsy smoke test remains for release validation.
+All six product stages are complete. Infrastructure work begins from `deploy/GCE_SERVER_SPEC.md`:
+
+1. Provision the reviewed Google Compute Engine VM.
+2. Configure IAP/OS Login, HTTPS ingress, secrets, backups, and monitoring.
+3. Deploy `v1.0.0`, run remote health checks, and establish a low-volume scheduled workload.
+
+Operational caveat: the current network is blocked by Etsy (HTTP 403). Production access must remain policy-compliant; do not attempt to bypass Etsy controls. Validate access from the deployment environment before enabling scheduled research.
