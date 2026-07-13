@@ -6,6 +6,7 @@ const log = createChildLogger('browser');
 export interface BrowserManager {
   getBrowser: () => import('playwright').Browser;
   getPage: () => import('playwright').Page;
+  createPage: () => Promise<import('playwright').Page>;
   close: () => Promise<void>;
   isBlocked: (page: import('playwright').Page) => Promise<boolean>;
 }
@@ -45,6 +46,7 @@ export async function createBrowserManager(
   return {
     getBrowser: () => browserInstance!,
     getPage: () => page,
+    createPage: () => context.newPage(),
     close: async () => {
       try {
         await context.close();

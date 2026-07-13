@@ -53,8 +53,8 @@ function parseNumber(text: string): number | null {
     return Number.isFinite(num) ? num : null;
   }
 
-  // Otherwise treat , as thousand separator (1,234 → 1234)
-  const cleaned = noSpaces.replace(/,/g, '.');
+  // Otherwise treat , as a thousands separator (1,234 → 1234)
+  const cleaned = noSpaces.replace(/,/g, '');
   const num = parseFloat(cleaned);
   return Number.isFinite(num) ? num : null;
 }
@@ -194,7 +194,6 @@ export async function fetchExchangeRate(from: string, to: string): Promise<numbe
 
 export async function normalizePrice(
   priceData: Partial<PriceData>,
-  targetCurrency: string = 'USD',
 ): Promise<PriceData> {
   const amount = priceData.amount ?? null;
   const currency = priceData.currency ?? null;
@@ -212,7 +211,7 @@ export async function normalizePrice(
     };
   }
 
-  if (currency === targetCurrency) {
+  if (currency === 'USD') {
     return {
       rawText: priceData.rawText ?? null,
       amount,
@@ -225,9 +224,9 @@ export async function normalizePrice(
     };
   }
 
-  const rate = await fetchExchangeRate(currency, targetCurrency);
+  const rate = await fetchExchangeRate(currency, 'USD');
   if (rate === null) {
-    log.warn({ amount, currency, targetCurrency }, 'Cannot convert currency, rate unavailable');
+    log.warn({ amount, currency, targetCurrency: 'USD' }, 'Cannot convert currency, rate unavailable');
     return {
       rawText: priceData.rawText ?? null,
       amount,

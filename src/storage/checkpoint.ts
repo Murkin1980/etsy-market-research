@@ -11,18 +11,21 @@ export interface CheckpointData {
   failedUrls: string[];
   timestamp: string;
   query: string;
+  runDir: string;
+  outputName: string;
 }
 
 export class CheckpointManager {
   private checkpointDir: string;
   private checkpointFile: string;
 
-  constructor(checkpointDir?: string) {
+  constructor(checkpointDir?: string, checkpointId: string = 'checkpoint') {
     this.checkpointDir = checkpointDir ?? config.paths.checkpoints;
     if (!fs.existsSync(this.checkpointDir)) {
       fs.mkdirSync(this.checkpointDir, { recursive: true });
     }
-    this.checkpointFile = path.join(this.checkpointDir, 'checkpoint.json');
+    const safeId = checkpointId.replace(/[^a-z0-9_-]+/gi, '-').replace(/^-|-$/g, '') || 'checkpoint';
+    this.checkpointFile = path.join(this.checkpointDir, `${safeId}.json`);
   }
 
   save(data: CheckpointData): void {
@@ -43,12 +46,28 @@ export class CheckpointManager {
 
     try {
       const content = fs.readFileSync(this.checkpointFile, 'utf-8');
-      const data: CheckpointData = JSON.parse(content);
+      const data = JSON.parse(content) as Partial<CheckpointData>;
+      if (
+        !Array.isArray(data.processedUrls) ||
+        !Array.isArray(data.successfulUrls) ||
+        !Array.isArray(data.failedUrls) ||
+        typeof data.query !== 'string'
+      ) {
+        throw new Error('Invalid checkpoint structure');
+      }
       log.info(
         { processed: data.processedUrls.length, failed: data.failedUrls.length },
         'Checkpoint loaded',
       );
-      return data;
+      return {
+        processedUrls: data.processedUrls,
+        successfulUrls: data.successfulUrls,
+        failedUrls: data.failedUrls,
+        timestamp: data.timestamp ?? '',
+        query: data.query,
+        runDir: data.runDir ?? '',
+        outputName: data.outputName ?? 'listings-full',
+      };
     } catch (err) {
       log.warn({ error: (err as Error).message }, 'Failed to load checkpoint');
       return null;

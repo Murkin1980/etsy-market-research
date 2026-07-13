@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parsePrice, parseNumericValue } from '../src/normalization/currency.js';
+import { parsePrice, parseNumericValue, normalizePrice } from '../src/normalization/currency.js';
 
 describe('currency', () => {
   describe('parsePrice', () => {
@@ -43,6 +43,11 @@ describe('currency', () => {
       const result = parsePrice('$1,234.56');
       expect(result.amount).toBe(1234.56);
     });
+
+    it('handles a whole-dollar price with a thousands separator', () => {
+      const result = parsePrice('$1,234');
+      expect(result.amount).toBe(1234);
+    });
   });
 
   describe('parseNumericValue', () => {
@@ -65,6 +70,14 @@ describe('currency', () => {
 
     it('returns null for non-numeric text', () => {
       expect(parseNumericValue('abc')).toBeNull();
+    });
+  });
+
+  describe('normalizePrice', () => {
+    it('always stores a real USD amount in amountUsd', async () => {
+      const result = await normalizePrice({ amount: 10, currency: 'EUR' });
+      expect(result.amountUsd).toBe(10.9);
+      expect(result.currency).toBe('EUR');
     });
   });
 });

@@ -6,6 +6,7 @@ import { normalizeUrl } from '../normalization/url.js';
 import type { BrowserManager } from './browser.js';
 import * as cheerio from 'cheerio';
 import type { ErrorType } from '../types/listing.js';
+import { parsePrice } from '../normalization/currency.js';
 
 const log = createChildLogger('listing-scraper');
 
@@ -22,7 +23,7 @@ export interface ListingScrapeResult {
     rawText: string | null;
     amount: number | null;
     currency: string | null;
-    originalPrice: string | null;
+    originalPrice: number | null;
     discountPercent: number | null;
   };
   listingRating: number | null;
@@ -57,7 +58,7 @@ export async function scrapeListing(
   timeoutMs: number,
   maxRetries: number,
 ): Promise<{ result: ListingScrapeResult | null; errorType: ErrorType | null; error: string | null }> {
-  const page = browserManager.getPage();
+  const page = await browserManager.createPage();
 
   try {
     const html = await withRetry(
@@ -105,10 +106,12 @@ export async function scrapeListing(
     );
 
     return { result: null, errorType, error: error.message };
+  } finally {
+    await page.close().catch(() => undefined);
   }
 }
 
-function parseListingHtml(html: string, searchItem: SearchResultItem): ListingScrapeResult {
+export function parseListingHtml(html: string, searchItem: SearchResultItem): ListingScrapeResult {
   const $ = cheerio.load(html);
 
   // Extract JSON-LD
@@ -167,32 +170,27 @@ function parseListingHtml(html: string, searchItem: SearchResultItem): ListingSc
   let amount: number | null = null;
   let currency: string | null = null;
   if (priceRawText) {
-    const cleaned = priceRawText.replace(/[^\d.,]/g, '').replace(',', '.');
-    amount = parseFloat(cleaned);
-    if (!Number.isFinite(amount)) amount = null;
+    const parsedPrice = parsePrice(priceRawText);
+    amount = parsedPrice.amount;
 
     // Try to get currency from JSON-LD
     currency = extractFromJsonLd(jsonLdData, 'offers', 'priceCurrency') as string | null;
-    if (!currency && priceRawText) {
-      if (priceRawText.includes('$')) currency = 'USD';
-      else if (priceRawText.includes('€')) currency = 'EUR';
-      else if (priceRawText.includes('£')) currency = 'GBP';
-    }
+    currency ??= parsedPrice.currency;
   }
 
   // Discount
   let discountPercent: number | null = null;
+  let originalPrice: number | null = null;
   if (originalPriceText && amount) {
-    const origCleaned = originalPriceText.replace(/[^\d.,]/g, '').replace(',', '.');
-    const origAmount = parseFloat(origCleaned);
-    if (Number.isFinite(origAmount) && origAmount > 0) {
-      discountPercent = Math.round(((origAmount - amount) / origAmount) * 100);
+    originalPrice = parsePrice(originalPriceText).amount;
+    if (originalPrice !== null && originalPrice > 0) {
+      discountPercent = Math.round(((originalPrice - amount) / originalPrice) * 100);
     }
   }
 
   // Rating — listing-specific
-  let listingRating: number | null = null;
-  const listingReviewCount: number | null = null;
+  let listingRating: number | null = searchItem.rating;
+  const listingReviewCount: number | null = searchItem.displayedReviewCount;
 
   // Try to find listing-specific review section
   const reviewSection = $('[id*="reviews"], [class*="review"]');
@@ -348,7 +346,7 @@ function parseListingHtml(html: string, searchItem: SearchResultItem): ListingSc
       rawText: priceRawText,
       amount,
       currency,
-      originalPrice: originalPriceText,
+      originalPrice,
       discountPercent,
     },
     listingRating,

@@ -242,10 +242,8 @@ const server = http.createServer(async (req, res) => {
         return;
       }
 
-      const runningCount = allJobs.filter((j) => j.status === 'running' || j.status === 'queued').length;
-      if (runningCount >= config.server.maxConcurrentJobs) {
-        sendJson(res, 202, { message: 'Job queued (all slots busy)', queuePosition: jobQueue.length + 1 });
-      }
+      const availableSlots = Math.max(0, config.server.maxConcurrentJobs - activeJobs.size);
+      const queuePosition = Math.max(0, jobQueue.length + 1 - availableSlots);
 
       jobCounter++;
       const job: ResearchJob = {
@@ -260,7 +258,11 @@ const server = http.createServer(async (req, res) => {
       log.info({ jobId: job.id, query }, 'Job queued');
       processQueue();
 
-      sendJson(res, 202, { jobId: job.id, status: 'queued' });
+      sendJson(res, 202, {
+        jobId: job.id,
+        status: 'queued',
+        ...(queuePosition > 0 ? { queuePosition } : {}),
+      });
     } catch (err) {
       sendJson(res, 500, { error: (err as Error).message });
     }
