@@ -17,6 +17,7 @@ Deployment started on 2026-07-14. This document records resource names and opera
 | Runtime secret | `etsy-production-env` (version 1 disabled) |
 | Snapshot policy | `etsy-daily-snapshots` (daily, 14 days) |
 | Monthly budget | 75 USD; alerts at 50%, 80%, and 100% |
+| Monitoring | Ops Agent plus `Etsy VM high CPU` alert policy |
 
 ## Security state
 
@@ -77,9 +78,19 @@ gcloud compute addresses describe etsy-research-ip `
   --format="value(address)"
 ```
 
+Create the high-CPU policy after creating an email notification channel:
+
+```powershell
+gcloud monitoring policies create `
+  --project=etsy-research-prod-2026 `
+  --policy-from-file=deploy/monitoring/high-cpu-policy.json `
+  --notification-channels=NOTIFICATION_CHANNEL_RESOURCE_NAME
+```
+
+The checked-in policy intentionally excludes notification destinations and credentials.
+
 ## Remaining rollout
 
 1. Point a domain A record at the reserved address.
 2. Install/configure Caddy and verify automatic TLS on ports 80/443.
-3. Configure an uptime check and alerting notification channel.
-4. Run a controlled policy-compliant Etsy smoke test from the VM.
+3. Configure a public HTTPS uptime check against `/health`.

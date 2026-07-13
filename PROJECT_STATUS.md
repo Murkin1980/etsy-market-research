@@ -95,4 +95,6 @@ Status: **In progress**
 - [x] Attach daily snapshots with 14-day retention and install Google Cloud Ops Agent.
 - [ ] Configure domain DNS and HTTPS reverse proxy.
 - [x] Complete controlled remote smoke tests; Etsy blocked both low-volume requests and the scraper stopped without bypass attempts.
-- [ ] Add uptime/notification alerts and deploy the blocked-search result fix.
+- [x] Deploy the blocked-search result fix and verify production reports `blockedCount=1` with a failed run status.
+- [x] Add a production email notification channel and a high-CPU alert policy.
+- [ ] Add a public HTTPS uptime check after the domain is connected.
