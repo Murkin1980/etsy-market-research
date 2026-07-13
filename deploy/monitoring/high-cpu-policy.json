@@ -1,0 +1,27 @@
+{
+  "displayName": "Etsy VM high CPU",
+  "combiner": "OR",
+  "enabled": true,
+  "conditions": [
+    {
+      "displayName": "CPU above 80 percent for 5 minutes",
+      "conditionThreshold": {
+        "filter": "resource.type=\"gce_instance\" AND metric.type=\"compute.googleapis.com/instance/cpu/utilization\"",
+        "comparison": "COMPARISON_GT",
+        "thresholdValue": 0.8,
+        "duration": "300s",
+        "trigger": {
+          "count": 1
+        }
+      }
+    }
+  ],
+  "documentation": {
+    "content": "A production Compute Engine VM exceeded 80% CPU utilization for at least five minutes. Check etsy-research-prod in me-central1-c.",
+    "mimeType": "text/markdown"
+  },
+  "userLabels": {
+    "environment": "production",
+    "service": "etsy"
+  }
+}
