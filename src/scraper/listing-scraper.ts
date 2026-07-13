@@ -1,7 +1,7 @@
 import type { SearchResultItem } from '../types/schemas.js';
 import { LISTING_SELECTORS } from './selectors.js';
 import { createChildLogger } from '../utils/logger.js';
-import { withRetry } from '../utils/retry.js';
+import { RetryError, withRetry } from '../utils/retry.js';
 import { normalizeUrl } from '../normalization/url.js';
 import type { BrowserManager } from './browser.js';
 import * as cheerio from 'cheerio';
@@ -52,6 +52,15 @@ export interface ListingScrapeResult {
   favoritesCount: number | null;
 }
 
+export function classifyScrapeError(error: Error): ErrorType {
+  const rootError = error instanceof RetryError ? error.lastError : error;
+  if (rootError.message.includes('CAPTCHA')) return 'CAPTCHA';
+  if (rootError.message.includes('BLOCKED')) return 'BLOCKED';
+  if (/timeout/i.test(rootError.message)) return 'TIMEOUT';
+  if (rootError.message.includes('net::ERR')) return 'HTTP_ERROR';
+  return 'UNKNOWN';
+}
+
 export async function scrapeListing(
   browserManager: BrowserManager,
   searchItem: SearchResultItem,
@@ -70,9 +79,9 @@ export async function scrapeListing(
         await page.waitForTimeout(2000);
 
         // Check for blocked
-        const blocked = await browserManager.isBlocked(page);
-        if (blocked) {
-          throw new Error('BLOCKED');
+        const blockReason = await browserManager.getBlockReason(page);
+        if (blockReason) {
+          throw new Error(blockReason);
         }
 
         return page.content();
@@ -81,24 +90,16 @@ export async function scrapeListing(
       searchItem.url,
     );
 
-    const blocked = await browserManager.isBlocked(page);
-    if (blocked) {
-      return { result: null, errorType: 'BLOCKED', error: 'Page blocked by Etsy' };
+    const blockReason = await browserManager.getBlockReason(page);
+    if (blockReason) {
+      return { result: null, errorType: blockReason, error: `Page rejected: ${blockReason}` };
     }
 
     const result = parseListingHtml(html, searchItem);
     return { result, errorType: null, error: null };
   } catch (err) {
     const error = err instanceof Error ? err : new Error(String(err));
-    let errorType: ErrorType = 'UNKNOWN';
-
-    if (error.message === 'BLOCKED') {
-      errorType = 'BLOCKED';
-    } else if (error.message.includes('Timeout')) {
-      errorType = 'TIMEOUT';
-    } else if (error.message.includes('net::ERR')) {
-      errorType = 'HTTP_ERROR';
-    }
+    const errorType = classifyScrapeError(error);
 
     log.error(
       { url: searchItem.url, errorType, message: error.message },
@@ -327,9 +328,11 @@ export function parseListingHtml(html: string, searchItem: SearchResultItem): Li
     cartsCount = parseInt(cartsMatch[1].replace(/,/g, ''), 10);
     if (!Number.isFinite(cartsCount)) cartsCount = null;
   }
-  const favMatch = engagementText.match(/([\d,]+)\s*(?:favorite|favorited)/i);
+  const favMatch = engagementText.match(
+    /(?:([\d,]+)\s*(?:favorite|favorited)|favorited\s+by\s+([\d,]+))/i,
+  );
   if (favMatch) {
-    favoritesCount = parseInt(favMatch[1].replace(/,/g, ''), 10);
+    favoritesCount = parseInt((favMatch[1] ?? favMatch[2]).replace(/,/g, ''), 10);
     if (!Number.isFinite(favoritesCount)) favoritesCount = null;
   }
 

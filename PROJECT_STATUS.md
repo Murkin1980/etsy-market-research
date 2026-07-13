@@ -1,6 +1,6 @@
 # Etsy Market Research — Project Progress
 
-Last updated: 2026-07-13
+Last updated: 2026-07-14
 
 ## Goal
 
@@ -52,13 +52,15 @@ Status: **Completed**
 
 ## Stage 4 — Browser lifecycle and integration reliability
 
-Status: **Pending**
+Status: **Completed**
 
 - [x] Close Chromium cleanly after CLI jobs and failures.
 - [x] Use isolated pages or contexts for concurrent listing work.
-- [ ] Add saved Etsy HTML fixtures and parser integration tests.
-- [ ] Add API job lifecycle tests without live Etsy access.
-- [ ] Verify retry, timeout, blocked-page, CAPTCHA, and partial-result behavior.
+- [x] Add saved Etsy-like HTML fixtures and parser integration tests.
+- [x] Add API job lifecycle tests without live Etsy access.
+- [x] Verify retry, timeout, blocked-page, CAPTCHA, and partial-result behavior.
+- [x] Deduplicate nested search-card matches and remove Etsy `click_key` tracking data.
+- [x] Complete a local Chromium smoke test against the API health endpoint.
 
 ## Stage 5 — Data quality and market analysis
 
@@ -86,16 +88,17 @@ Status: **Pending**
 
 ```text
 npm run typecheck  PASS
-npm test           PASS (59/59)
+npm test           PASS (70/70)
 npm run build      PASS
 npm run lint       PASS
 npm audit          PASS (0 known vulnerabilities)
+browser smoke      PASS (local Chromium + /health, no console errors)
 ```
 
 ## Current known high-priority risks
 
-1. Saved Etsy HTML fixtures and parser integration tests are still missing.
-2. Retry, timeout, CAPTCHA, and blocked-page flows need integration coverage.
+1. Listing evidence and shop-level proxy signals are still mixed in sales scoring.
+2. Important extracted fields do not yet record source and confidence.
 3. Common currency pairs use static rates before the live provider is attempted.
 4. Exported listing objects are not validated with Zod before being written.
 5. CI and container smoke tests are not yet automated in GitHub Actions.

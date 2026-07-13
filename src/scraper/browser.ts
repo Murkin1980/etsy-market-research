@@ -9,6 +9,28 @@ export interface BrowserManager {
   createPage: () => Promise<import('playwright').Page>;
   close: () => Promise<void>;
   isBlocked: (page: import('playwright').Page) => Promise<boolean>;
+  getBlockReason: (page: import('playwright').Page) => Promise<BlockReason>;
+}
+
+export type BlockReason = 'BLOCKED' | 'CAPTCHA' | null;
+
+export function detectBlockReason(content: string, url: string = ''): BlockReason {
+  const text = content.toLowerCase();
+  const normalizedUrl = url.toLowerCase();
+  if (
+    normalizedUrl.includes('/captcha') ||
+    normalizedUrl.includes('/challenge') ||
+    text.includes('captcha') ||
+    text.includes('verify you are human') ||
+    text.includes('please verify')
+  ) {
+    return 'CAPTCHA';
+  }
+
+  for (const indicator of BLOCKED_INDICATORS) {
+    if (text.includes(indicator.toLowerCase())) return 'BLOCKED';
+  }
+  return null;
 }
 
 let browserInstance: import('playwright').Browser | null = null;
@@ -54,23 +76,22 @@ export async function createBrowserManager(
         // ignore
       }
     },
+    getBlockReason: async (targetPage: import('playwright').Page): Promise<BlockReason> => {
+      try {
+        const content = await targetPage.content();
+        const url = targetPage.url();
+        return detectBlockReason(content, url);
+      } catch {
+        return 'BLOCKED';
+      }
+    },
     isBlocked: async (targetPage: import('playwright').Page): Promise<boolean> => {
       try {
         const content = await targetPage.content();
-        const text = content.toLowerCase();
-        for (const indicator of BLOCKED_INDICATORS) {
-          if (text.includes(indicator.toLowerCase())) {
-            return true;
-          }
-        }
-        const url = targetPage.url();
-        if (url.includes('/captcha') || url.includes('/challenge')) {
-          return true;
-        }
+        return detectBlockReason(content, targetPage.url()) !== null;
       } catch {
         return true;
       }
-      return false;
     },
   };
 }

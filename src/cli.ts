@@ -6,6 +6,7 @@ import { closeBrowser, createBrowserManager } from './scraper/browser.js';
 import { scrapeSearchResults } from './scraper/search-scraper.js';
 import { scrapeListing } from './scraper/listing-scraper.js';
 import type { ListingScrapeResult } from './scraper/listing-scraper.js';
+import { evaluateScrapeCompleteness } from './scraper/scrape-quality.js';
 import { calculateSalesScore, calculateMarketSummary } from './analysis/scoring.js';
 import { extractFeatures, extractMarketFeatures } from './analysis/feature-extractor.js';
 import { LlmAnalyzer } from './analysis/llm-analyzer.js';
@@ -119,14 +120,7 @@ async function buildListingFromScrapeResult(
     sr.title,
   );
 
-  const missingFields: string[] = [];
-  if (!sr.title) missingFields.push('title');
-  if (sr.price.amount === null) missingFields.push('price');
-  if (sr.descriptionRaw === null) missingFields.push('description');
-  if (sr.imageUrls.length === 0) missingFields.push('images');
-
-  let scrapingStatus: EtsyListing['scraping']['status'] = 'success';
-  if (missingFields.length > 2) scrapingStatus = 'partial';
+  const { missingFields, status: scrapingStatus } = evaluateScrapeCompleteness(sr);
 
   const normalizedPrice = await normalizePrice(
     {

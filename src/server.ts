@@ -1,6 +1,5 @@
 import http from 'http';
 import { spawn } from 'child_process';
-import { randomUUID } from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { config } from './config/env.js';
@@ -12,28 +11,16 @@ import {
   parseRunResultOutput,
   RequestBodyError,
   secretsEqual,
-  type ResearchJobRequest,
   type RunResultPayload,
 } from './server-api.js';
+import {
+  JobManager,
+  JobQueueFullError,
+  type ResearchJob,
+} from './server-jobs.js';
 import { createChildLogger } from './utils/logger.js';
 
 const log = createChildLogger('server');
-
-interface ResearchJob {
-  id: string;
-  query: string;
-  request: ResearchJobRequest;
-  status: 'queued' | 'running' | 'completed' | 'failed';
-  queuedAt: string;
-  startedAt?: string;
-  completedAt?: string;
-  result?: RunResultPayload;
-  error?: string;
-}
-
-const jobQueue: ResearchJob[] = [];
-const activeJobs = new Set<string>();
-const allJobs: ResearchJob[] = [];
 
 const rateLimitMap = new Map<string, number[]>();
 const RATE_WINDOW_MS = 60_000;
@@ -83,79 +70,60 @@ function readRunResult(runDir: string): RunResultPayload | null {
   }
 }
 
-function pruneJobHistory(): void {
-  const terminalJobs = allJobs.filter((job) => job.status === 'completed' || job.status === 'failed');
-  const overflow = terminalJobs.length - config.server.maxJobsRetained;
-  if (overflow <= 0) return;
-
-  const idsToRemove = new Set(terminalJobs.slice(0, overflow).map((job) => job.id));
-  for (let index = allJobs.length - 1; index >= 0; index--) {
-    if (idsToRemove.has(allJobs[index].id)) allJobs.splice(index, 1);
-  }
-}
-
-function startJob(job: ResearchJob): void {
-  activeJobs.add(job.id);
-  job.status = 'running';
-  job.startedAt = new Date().toISOString();
-
+function executeCliJob(job: ResearchJob): Promise<RunResultPayload> {
   log.info({ jobId: job.id, query: job.query }, 'Starting job');
 
-  const child = spawn('node', buildCliParams(job.id, job.request), {
-    cwd: process.cwd(),
-    stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env },
-  });
+  return new Promise((resolve, reject) => {
+    const child = spawn('node', buildCliParams(job.id, job.request), {
+      cwd: process.cwd(),
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env },
+    });
 
-  let stdout = '';
-  let stderr = '';
-  let settled = false;
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
 
-  child.stdout.on('data', (data: Buffer) => {
-    stdout = (stdout + data.toString()).slice(-MAX_CHILD_OUTPUT_BYTES);
-  });
-  child.stderr.on('data', (data: Buffer) => {
-    stderr = (stderr + data.toString()).slice(-MAX_CHILD_OUTPUT_BYTES);
-  });
+    child.stdout.on('data', (data: Buffer) => {
+      stdout = (stdout + data.toString()).slice(-MAX_CHILD_OUTPUT_BYTES);
+    });
+    child.stderr.on('data', (data: Buffer) => {
+      stderr = (stderr + data.toString()).slice(-MAX_CHILD_OUTPUT_BYTES);
+    });
 
-  const finish = (code: number | null, spawnError?: Error): void => {
-    if (settled) return;
-    settled = true;
-    activeJobs.delete(job.id);
-    job.completedAt = new Date().toISOString();
+    const finish = (code: number | null, spawnError?: Error): void => {
+      if (settled) return;
+      settled = true;
 
-    if (spawnError || code !== 0) {
-      job.status = 'failed';
-      job.error = spawnError?.message ?? `Exit code ${code}: ${stderr.slice(-500)}`;
-      log.error({ jobId: job.id, code, error: job.error }, 'Job failed');
-    } else {
+      if (spawnError || code !== 0) {
+        reject(spawnError ?? new Error(`Exit code ${code}: ${stderr.slice(-500)}`));
+        return;
+      }
+
       const result = parseRunResultOutput(stdout);
-      if (result?.status === 'completed') {
-        job.status = 'completed';
-        job.result = result;
+      if (!result) {
+        reject(new Error('CLI completed without a valid structured result'));
+        return;
+      }
+      if (result.status === 'completed') {
         log.info({ jobId: job.id, runDir: result.runDir }, 'Job completed');
       } else {
-        job.status = 'failed';
-        job.error = result?.error ?? 'CLI completed without a valid structured result';
-        if (result) job.result = result;
-        log.error({ jobId: job.id, error: job.error }, 'Job returned an invalid result');
+        log.error({ jobId: job.id, error: result.error }, 'Job returned a failed result');
       }
-    }
+      resolve(result);
+    };
 
-    pruneJobHistory();
-    processQueue();
-  };
-
-  child.on('close', (code: number | null) => finish(code));
-  child.on('error', (error: Error) => finish(null, error));
+    child.on('close', (code: number | null) => finish(code));
+    child.on('error', (error: Error) => finish(null, error));
+  });
 }
 
-function processQueue(): void {
-  while (activeJobs.size < config.server.maxConcurrentJobs && jobQueue.length > 0) {
-    const job = jobQueue.shift();
-    if (job) startJob(job);
-  }
-}
+const jobManager = new JobManager({
+  maxConcurrent: config.server.maxConcurrentJobs,
+  maxQueued: config.server.maxQueuedJobs,
+  maxRetained: config.server.maxJobsRetained,
+  execute: executeCliJob,
+});
 
 function sendJson(res: http.ServerResponse, status: number, data: unknown): void {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
@@ -190,14 +158,21 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (url.pathname === '/favicon.ico') {
+    res.writeHead(204);
+    res.end();
+    return;
+  }
+
   if (url.pathname === '/' || url.pathname === '/health') {
+    const jobStats = jobManager.stats();
     sendJson(res, 200, {
       status: 'ok',
       version: '1.0.0',
       uptime: process.uptime(),
-      activeJobs: activeJobs.size,
-      queuedJobs: jobQueue.length,
-      retainedJobs: allJobs.length,
+      activeJobs: jobStats.active,
+      queuedJobs: jobStats.queued,
+      retainedJobs: jobStats.retained,
       maxConcurrent: config.server.maxConcurrentJobs,
       maxQueued: config.server.maxQueuedJobs,
     });
@@ -220,33 +195,17 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (url.pathname === '/jobs' && req.method === 'GET') {
-    sendJson(res, 200, { jobs: allJobs, total: allJobs.length });
+    const jobs = jobManager.list();
+    sendJson(res, 200, { jobs, total: jobs.length });
     return;
   }
 
   if (url.pathname === '/jobs' && req.method === 'POST') {
     try {
-      if (jobQueue.length >= config.server.maxQueuedJobs) {
-        sendJson(res, 429, { error: 'Job queue is full', maxQueued: config.server.maxQueuedJobs });
-        return;
-      }
-
       const body = await parseJsonBody(req, config.server.maxRequestBodyBytes);
       const request = parseResearchJobRequest(body);
-      const availableSlots = Math.max(0, config.server.maxConcurrentJobs - activeJobs.size);
-      const queuePosition = Math.max(0, jobQueue.length + 1 - availableSlots);
-      const job: ResearchJob = {
-        id: randomUUID(),
-        query: request.query,
-        request,
-        status: 'queued',
-        queuedAt: new Date().toISOString(),
-      };
-
-      allJobs.push(job);
-      jobQueue.push(job);
+      const { job, queuePosition } = jobManager.enqueue(request);
       log.info({ jobId: job.id, query: job.query }, 'Job queued');
-      processQueue();
 
       sendJson(res, 202, {
         jobId: job.id,
@@ -254,7 +213,9 @@ const server = http.createServer(async (req, res) => {
         ...(queuePosition > 0 ? { queuePosition } : {}),
       });
     } catch (error) {
-      if (error instanceof RequestBodyError) {
+      if (error instanceof JobQueueFullError) {
+        sendJson(res, 429, { error: 'Job queue is full', maxQueued: error.maxQueued });
+      } else if (error instanceof RequestBodyError) {
         sendJson(res, error.statusCode, { error: error.message, details: error.details });
       } else {
         log.error({ error: (error as Error).message }, 'Failed to create job');
@@ -266,7 +227,7 @@ const server = http.createServer(async (req, res) => {
 
   if (url.pathname.startsWith('/jobs/') && req.method === 'GET') {
     const jobId = url.pathname.split('/')[2];
-    const job = allJobs.find((candidate) => candidate.id === jobId);
+    const job = jobManager.get(jobId);
     if (!job) {
       sendJson(res, 404, { error: 'Job not found' });
       return;

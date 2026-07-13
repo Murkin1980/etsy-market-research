@@ -10,10 +10,11 @@ import {
 describe('url normalization', () => {
   describe('normalizeUrl', () => {
     it('removes tracking parameters', () => {
-      const url = 'https://www.etsy.com/listing/123456789?utm_source=test&ref=something';
+      const url = 'https://www.etsy.com/listing/123456789?utm_source=test&ref=something&click_key=tracking';
       const result = normalizeUrl(url);
       expect(result).not.toContain('utm_source');
       expect(result).not.toContain('ref=');
+      expect(result).not.toContain('click_key');
       expect(result).toContain('/listing/123456789');
     });
 

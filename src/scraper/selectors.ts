@@ -34,7 +34,8 @@ export const SEARCH_SELECTORS = {
   popularNow: '[class*="popular"], .wt-badge--popular',
 
   // Ad indicator
-  adIndicator: '[class*="ad"], [data-appears-component-name*="ad"]',
+  adIndicator:
+    '[data-appears-component-name*="ad"], [data-ad-label], .v2-listing-card__ad-badge',
 
   // Discount / sale price
   salePrice: '.lc-price .wt-text-strikethrough',

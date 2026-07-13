@@ -13,6 +13,7 @@ export function parseSearchPage(
 ): { results: SearchResultItem[]; nextPageAvailable: boolean } {
   const $ = cheerio.load(html);
   const results: SearchResultItem[] = [];
+  const seenListings = new Set<string>();
   let position = 0;
 
   // Try to detect blocked page
@@ -24,7 +25,6 @@ export function parseSearchPage(
   // Parse listing cards
   $(SEARCH_SELECTORS.listingCard).each((_i, el) => {
     const $card = $(el);
-    position++;
 
     // Extract listing URL and ID
     const linkEl = $card.find(SEARCH_SELECTORS.listingLink);
@@ -88,6 +88,10 @@ export function parseSearchPage(
     if (!normalizedUrl || normalizedUrl.includes('/search')) {
       return; // Skip non-listing cards (navigation, etc.)
     }
+    const dedupeKey = listingId ?? normalizedUrl;
+    if (seenListings.has(dedupeKey)) return;
+    seenListings.add(dedupeKey);
+    position++;
 
     results.push({
       listingId,

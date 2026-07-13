@@ -12,6 +12,7 @@ export const TRACKING_PARAMS = new Set([
   'utm_term',
   'ref',
   'click_id',
+  'click_key',
   'gclid',
   'fbclid',
   'msclkid',
