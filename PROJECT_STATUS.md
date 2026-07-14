@@ -101,7 +101,7 @@ Status: **Completed**
 
 ## Stage 8 — Signal Lab web panel
 
-Status: **Ready for production deployment**
+Status: **Completed**
 
 - [x] Add a responsive operational dashboard, research form, job polling, run history, and result details.
 - [x] Keep API credentials tab-scoped and add explicit connect, disconnect, unauthorized, and read-only states.
@@ -109,4 +109,15 @@ Status: **Ready for production deployment**
 - [x] Self-host Lucide `1.24.0`, Onest Cyrillic, and Instrument Serif assets under a strict CSP.
 - [x] Verify desktop and 390 px mobile layouts, keyboard-accessible semantics, empty/error states, and zero clean-load console errors.
 - [x] Pass typecheck, lint, 84/84 tests, build, and local production-server browser checks.
-- [ ] Deploy release `v1.1.0` to Google Cloud and verify the complete public workflow.
+- [x] Deploy release `v1.1.0` to Google Cloud and verify the complete public workflow.
+
+Production verification:
+
+```text
+public panel       PASS (HTTPS 200, strict CSP, self-hosted assets)
+health             PASS (v1.1.0, container healthy)
+authorization      PASS (Secret Manager key, no key disclosure)
+stored runs        PASS (3 production runs visible)
+report downloads   PASS (5 allowlisted files visible for a stored run)
+browser console    PASS (0 errors, 0 warnings on clean load)
+```
