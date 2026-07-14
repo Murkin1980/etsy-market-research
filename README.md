@@ -74,6 +74,17 @@ The schema version is recorded in `run-result.json`, metadata, JSON, and CSV exp
 
 ## HTTP API
 
+The production server includes the **Signal Lab** web panel at `/`. It provides:
+
+- API-key connection stored only in the current browser tab;
+- validated research-job creation with conservative defaults;
+- live queue/job status and clear blocked/failed states;
+- retained job and stored-run browsing;
+- authenticated downloads for allowlisted JSON/CSV report files;
+- responsive desktop/mobile layouts with self-hosted Onest, Instrument Serif, and Lucide assets.
+
+Production panel: <https://34-18-107-101.sslip.io/>
+
 ```bash
 npm run build
 npm start
@@ -91,18 +102,21 @@ curl -X POST http://127.0.0.1:3000/jobs \
 
 | Route | Auth | Purpose |
 | --- | --- | --- |
+| `GET /` | public | Signal Lab web panel |
 | `GET /health` | public | Health and queue capacity |
 | `GET /jobs` | bearer | Retained jobs |
 | `POST /jobs` | bearer | Validate and queue research |
 | `GET /jobs/:id` | bearer | Job state and structured result |
 | `GET /runs` | bearer | Stored run summaries |
+| `GET /runs/:id/files` | bearer | Allowlisted report-file metadata |
+| `GET /runs/:id/files/:name` | bearer | Download an allowlisted JSON/CSV report |
 
 The API validates body size and fields, limits requests by client IP, caps the job queue, bounds child-process output, and shuts down active workers on `SIGTERM`/`SIGINT`. Configure `TRUST_PROXY=true` only behind a trusted proxy that replaces `X-Forwarded-For`.
 
 ## Quality gates
 
 ```bash
-npm run check       # typecheck + lint + 81 tests + build
+npm run check       # typecheck + lint + 84 tests + build
 npm run smoke:api   # health, auth, and validation smoke test
 npm audit --audit-level=high
 ```

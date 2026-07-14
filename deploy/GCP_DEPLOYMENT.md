@@ -71,6 +71,14 @@ Public HTTPS health check:
 curl --fail --silent https://34-18-107-101.sslip.io/health
 ```
 
+Open the production web panel:
+
+```text
+https://34-18-107-101.sslip.io/
+```
+
+The panel keeps the API key in browser `sessionStorage`, sends it only in same-origin bearer requests, and clears it when the tab session ends. Report downloads are restricted to the server-side allowlist in `src/run-files.ts`.
+
 Service and container status:
 
 ```bash

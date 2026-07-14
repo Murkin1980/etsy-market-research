@@ -18,6 +18,8 @@ import {
   JobQueueFullError,
   type ResearchJob,
 } from './server-jobs.js';
+import { listRunFiles, resolveRunFile } from './run-files.js';
+import { resolveUiAsset } from './server-ui.js';
 import { closeLogStreams, createChildLogger } from './utils/logger.js';
 
 const log = createChildLogger('server');
@@ -26,6 +28,7 @@ const rateLimitMap = new Map<string, number[]>();
 const RATE_WINDOW_MS = 60_000;
 const MAX_CHILD_OUTPUT_BYTES = 1_000_000;
 const MIN_PRODUCTION_API_KEY_LENGTH = 24;
+const APP_VERSION = '1.1.0';
 const activeChildren = new Set<ReturnType<typeof spawn>>();
 let rateLimitChecks = 0;
 
@@ -133,6 +136,36 @@ function sendJson(res: http.ServerResponse, status: number, data: unknown): void
   res.end(JSON.stringify(data, null, 2));
 }
 
+function applyUiSecurityHeaders(res: http.ServerResponse): void {
+  res.setHeader(
+    'Content-Security-Policy',
+    "default-src 'self'; base-uri 'none'; connect-src 'self'; font-src 'self'; form-action 'self'; frame-ancestors 'none'; img-src 'self' data:; object-src 'none'; script-src 'self'; style-src 'self'",
+  );
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+}
+
+function sendUiAsset(res: http.ServerResponse, pathname: string): boolean {
+  const asset = resolveUiAsset(pathname);
+  if (!asset) return false;
+  applyUiSecurityHeaders(res);
+  res.writeHead(200, {
+    'Content-Type': asset.contentType,
+    'Cache-Control': asset.cacheControl,
+  });
+  fs.createReadStream(asset.filePath).pipe(res);
+  return true;
+}
+
+function decodePathSegment(value: string): string | null {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return null;
+  }
+}
+
 function applyCors(req: http.IncomingMessage, res: http.ServerResponse): void {
   const configuredOrigin = config.server.corsOrigin;
   const requestOrigin = req.headers.origin;
@@ -162,16 +195,18 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (url.pathname === '/favicon.ico') {
-    res.writeHead(204);
+    res.writeHead(302, { Location: '/assets/favicon.svg' });
     res.end();
     return;
   }
 
-  if (url.pathname === '/' || url.pathname === '/health') {
+  if (req.method === 'GET' && sendUiAsset(res, url.pathname)) return;
+
+  if (url.pathname === '/health') {
     const jobStats = jobManager.stats();
     sendJson(res, 200, {
       status: 'ok',
-      version: '1.0.0',
+      version: APP_VERSION,
       uptime: process.uptime(),
       activeJobs: jobStats.active,
       queuedJobs: jobStats.queued,
@@ -249,6 +284,45 @@ const server = http.createServer(async (req, res) => {
       .filter((directory) => !directory.startsWith('.'))
       .map((directory) => ({ id: directory, ...readRunResult(path.join(runsDir, directory)) }));
     sendJson(res, 200, { runs, total: runs.length });
+    return;
+  }
+
+  const runFilesMatch = url.pathname.match(/^\/runs\/([^/]+)\/files$/);
+  if (runFilesMatch && req.method === 'GET') {
+    const runId = decodePathSegment(runFilesMatch[1]);
+    if (!runId) {
+      sendJson(res, 400, { error: 'Invalid run identifier' });
+      return;
+    }
+    const files = listRunFiles(config.paths.runs, runId);
+    if (!files) {
+      sendJson(res, 404, { error: 'Run not found' });
+      return;
+    }
+    sendJson(res, 200, { runId, files, total: files.length });
+    return;
+  }
+
+  const runFileMatch = url.pathname.match(/^\/runs\/([^/]+)\/files\/([^/]+)$/);
+  if (runFileMatch && req.method === 'GET') {
+    const runId = decodePathSegment(runFileMatch[1]);
+    const fileName = decodePathSegment(runFileMatch[2]);
+    if (!runId || !fileName) {
+      sendJson(res, 400, { error: 'Invalid run file path' });
+      return;
+    }
+    const file = resolveRunFile(config.paths.runs, runId, fileName);
+    if (!file) {
+      sendJson(res, 404, { error: 'Run file not found' });
+      return;
+    }
+    res.writeHead(200, {
+      'Content-Type': file.definition.contentType,
+      'Content-Disposition': `attachment; filename="${fileName}"`,
+      'Cache-Control': 'private, no-store',
+      'X-Content-Type-Options': 'nosniff',
+    });
+    fs.createReadStream(file.filePath).pipe(res);
     return;
   }
 
