@@ -24,6 +24,8 @@ import path from 'path';
 import type { EtsyListing, FailedListing, RunMetadata } from './types/listing.js';
 import type { SearchResultItem } from './types/schemas.js';
 import type { LlmAnalysisResult } from './types/schemas.js';
+import { EtsyApiClient } from './etsy-api/client.js';
+import { mapApiListings, type MappedApiListing } from './etsy-api/mapper.js';
 
 const log = createChildLogger('cli');
 
@@ -139,7 +141,7 @@ async function buildListingFromScrapeResult(
     title: sr.title,
     shopName: sr.shopName,
     shopUrl: sr.shopUrl,
-    productType: sr.isDigital ? 'digital' : 'unknown',
+    productType: sr.productType ?? (sr.isDigital ? 'digital' : 'unknown'),
     price: normalizedPrice,
     rating: {
       listingRating: sr.listingRating,
@@ -193,7 +195,9 @@ async function buildListingFromScrapeResult(
       status: scrapingStatus,
       scrapedAt: new Date().toISOString(),
       missingFields,
-      warnings: [],
+      warnings: sr.evidence.title.source === 'api'
+        ? ['Official Etsy API does not expose listing-specific reviews or marketplace badges.']
+        : [],
     },
   };
 
@@ -273,27 +277,57 @@ async function main(): Promise<void> {
     }
   }
 
-  // Phase 1: Search scraping
-  log.info('=== Phase 1: Search Results ===');
-  const browserManager = await createBrowserManager(args.headless);
-
+  // Phase 1: Search discovery
+  const useOfficialApi = config.etsyDataSource === 'api';
+  log.info({ source: useOfficialApi ? 'etsy-api' : 'browser-scraper' }, '=== Phase 1: Search Results ===');
   let searchResults: SearchResultItem[];
   let searchBlockedCount = 0;
-  try {
-    const searchScrapeResult = await scrapeSearchResults(browserManager, {
+  let mappedApiListings: Map<string, MappedApiListing> | null = null;
+
+  if (useOfficialApi) {
+    if (!config.etsyApiKey) {
+      throw new Error(
+        'ETSY_API_KEY is not configured. Add the Etsy keystring and shared secret as keystring:shared_secret.',
+      );
+    }
+    const client = new EtsyApiClient({
+      apiKey: config.etsyApiKey,
+      baseUrl: config.etsyApiBaseUrl,
+      timeoutMs: config.etsyApi.timeoutMs,
+      maxRetries: config.etsyApi.maxRetries,
+    });
+    const apiResult = await client.searchActiveListings({
       query: args.query,
       pages: args.pages,
+      maxListings: args.maxListings,
       currency: args.currency,
       country: args.country,
-      language: args.language,
-      delayMinMs: args.delayMin,
-      delayMaxMs: args.delayMax,
-      timeoutMs: config.scraper.timeoutMs,
     });
-    searchResults = searchScrapeResult.results;
-    searchBlockedCount = searchScrapeResult.blockedCount;
-  } finally {
-    await browserManager.close();
+    const mapped = mapApiListings(apiResult.listings);
+    mappedApiListings = new Map(mapped.map((item) => [item.searchItem.url, item]));
+    searchResults = mapped.map((item) => item.searchItem);
+    log.info(
+      { returned: searchResults.length, totalAvailable: apiResult.totalAvailable },
+      'Official Etsy API search complete',
+    );
+  } else {
+    const browserManager = await createBrowserManager(args.headless);
+    try {
+      const searchScrapeResult = await scrapeSearchResults(browserManager, {
+        query: args.query,
+        pages: args.pages,
+        currency: args.currency,
+        country: args.country,
+        language: args.language,
+        delayMinMs: args.delayMin,
+        delayMaxMs: args.delayMax,
+        timeoutMs: config.scraper.timeoutMs,
+      });
+      searchResults = searchScrapeResult.results;
+      searchBlockedCount = searchScrapeResult.blockedCount;
+    } finally {
+      await browserManager.close();
+    }
   }
 
   if (searchResults.length > args.maxListings) {
@@ -311,7 +345,7 @@ async function main(): Promise<void> {
   const failedListings: FailedListing[] = [...existingFailed];
   let blockedCount = searchBlockedCount;
 
-  const bm = await createBrowserManager(args.headless);
+  const bm = useOfficialApi ? null : await createBrowserManager(args.headless);
   const concurrencyLimiter = new ConcurrencyLimiter(args.concurrency);
 
   // Sliding window for error tracking
@@ -410,12 +444,15 @@ async function main(): Promise<void> {
           `Processing listing ${i + 1}/${searchResults.length}`,
         );
 
-        const { result, errorType, error } = await scrapeListing(
-          bm,
-          searchItem,
-          config.scraper.timeoutMs,
-          config.scraper.maxRetries,
-        );
+        const apiListing = mappedApiListings?.get(searchItem.url);
+        const { result, errorType, error } = apiListing
+          ? { result: apiListing.scrapeResult, errorType: null, error: null }
+          : await scrapeListing(
+              bm!,
+              searchItem,
+              config.scraper.timeoutMs,
+              config.scraper.maxRetries,
+            );
 
         if (result) {
           const listing = await buildListingFromScrapeResult(result, searchItem);
@@ -457,7 +494,7 @@ async function main(): Promise<void> {
         logProgress();
       }
 
-      if (i < searchResults.length - 1) {
+      if (!useOfficialApi && i < searchResults.length - 1) {
         await randomDelay(args.delayMin, args.delayMax);
       }
     });
@@ -468,7 +505,7 @@ async function main(): Promise<void> {
     );
   } finally {
     if (processedSinceCheckpoint > 0) persistProgress();
-    await bm.close();
+    await bm?.close();
   }
 
   // Phase 3: Market analysis
@@ -509,7 +546,7 @@ async function main(): Promise<void> {
     query: args.query,
     startedAt: new Date(startTime).toISOString(),
     completedAt: new Date().toISOString(),
-    params: { pages: args.pages, maxListings: args.maxListings, currency: args.currency, country: args.country, language: args.language, headless: args.headless, concurrency: args.concurrency, useLlm: args.useLlm },
+    params: { dataSource: useOfficialApi ? 'etsy-api' : 'browser-scraper', pages: args.pages, maxListings: args.maxListings, currency: args.currency, country: args.country, language: args.language, headless: args.headless, concurrency: args.concurrency, useLlm: args.useLlm },
     totalFound: searchResults.length,
     successCount: listings.filter((l) => l.scraping.status === 'success').length,
     partialCount: listings.filter((l) => l.scraping.status === 'partial').length,

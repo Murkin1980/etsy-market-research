@@ -31,7 +31,7 @@ export const PriceDataSchema = z.object({
 });
 
 const FieldEvidenceSchema = z.object({
-  source: z.enum(['json_ld', 'embedded_json', 'dom', 'text', 'search_result', 'llm']).nullable(),
+  source: z.enum(['json_ld', 'embedded_json', 'dom', 'text', 'search_result', 'api', 'llm']).nullable(),
   confidence: z.number().min(0).max(1),
 });
 

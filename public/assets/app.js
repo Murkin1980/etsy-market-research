@@ -221,7 +221,12 @@
     try {
       const health = await api('/health', { apiKeyOverride: '' });
       state.health = health;
-      updateConnectionUi(true, 'Production онлайн');
+      updateConnectionUi(true, health.etsyApiConfigured ? 'Etsy API подключён' : 'Нужен ключ Etsy API');
+      elements.sidebarStatusText.textContent = health.etsyApiConfigured ? 'Etsy API подключён' : 'Нужен ключ Etsy API';
+      elements.submitResearchButton.disabled = health.dataSource === 'etsy-api' && !health.etsyApiConfigured;
+      elements.submitResearchButton.title = elements.submitResearchButton.disabled
+        ? 'Настройте ETSY_API_KEY на сервере перед запуском исследования'
+        : '';
       $('metricActive').textContent = String(health.activeJobs ?? 0);
       $('metricQueued').textContent = String(health.queuedJobs ?? 0);
       $('metricRetained').textContent = String(health.retainedJobs ?? 0);
@@ -231,6 +236,7 @@
       return true;
     } catch (error) {
       updateConnectionUi(false, 'Нет соединения');
+      elements.submitResearchButton.disabled = true;
       return false;
     }
   }

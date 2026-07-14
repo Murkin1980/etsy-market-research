@@ -1,6 +1,6 @@
 # Etsy Market Research — Project Progress
 
-Last updated: 2026-07-14
+Last updated: 2026-07-15
 
 ## Goal
 
@@ -120,4 +120,23 @@ authorization      PASS (Secret Manager key, no key disclosure)
 stored runs        PASS (3 production runs visible)
 report downloads   PASS (5 allowlisted files visible for a stored run)
 browser console    PASS (0 errors, 0 warnings on clean load)
+```
+
+## Stage 9 — Official Etsy Open API v3
+
+Status: **Implementation completed; credential activation pending**
+
+- [x] Replace production browser collection with `findAllListingsActive` from the official Etsy Open API v3.
+- [x] Enrich search results in batches of up to 100 through `getListingsByListingIds` with Images, Shop, Videos, and BuyerPrice.
+- [x] Add bounded retries, `Retry-After` handling, timeouts, clear 401/403/429 errors, and secret-safe logging.
+- [x] Map API data into the existing versioned reports while keeping shop proxies separate from listing evidence.
+- [x] Expose non-secret Etsy API readiness in `/health` and disable launches in Signal Lab until the server credential is configured.
+- [x] Add four API regression tests and pass typecheck, lint, 88/88 tests, and build.
+- [ ] Register the Etsy application, add `ETSY_API_KEY=keystring:shared_secret` to Secret Manager, and run the first production API research.
+
+Official API flow:
+
+```text
+Signal Lab → protected job → Etsy active-listing search → batch enrichment
+           → evidence mapping → scoring/analysis → JSON + CSV reports
 ```

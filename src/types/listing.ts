@@ -4,6 +4,7 @@ export type ExtractionSource =
   | 'dom'
   | 'text'
   | 'search_result'
+  | 'api'
   | 'llm'
   | null;
 
