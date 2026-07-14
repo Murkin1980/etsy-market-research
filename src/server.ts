@@ -28,7 +28,7 @@ const rateLimitMap = new Map<string, number[]>();
 const RATE_WINDOW_MS = 60_000;
 const MAX_CHILD_OUTPUT_BYTES = 1_000_000;
 const MIN_PRODUCTION_API_KEY_LENGTH = 24;
-const APP_VERSION = '1.1.0';
+const APP_VERSION = '1.2.0';
 const activeChildren = new Set<ReturnType<typeof spawn>>();
 let rateLimitChecks = 0;
 
@@ -213,6 +213,8 @@ const server = http.createServer(async (req, res) => {
       retainedJobs: jobStats.retained,
       maxConcurrent: config.server.maxConcurrentJobs,
       maxQueued: config.server.maxQueuedJobs,
+      dataSource: config.etsyDataSource === 'api' ? 'etsy-api' : 'browser-scraper',
+      etsyApiConfigured: Boolean(config.etsyApiKey),
     });
     return;
   }

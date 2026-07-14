@@ -28,6 +28,9 @@ export const config = {
   isProduction,
   anthropicApiKey: env('ANTHROPIC_API_KEY'),
   openaiApiKey: env('OPENAI_API_KEY'),
+  etsyApiKey: env('ETSY_API_KEY'),
+  etsyDataSource: env('ETSY_DATA_SOURCE', 'api') as 'api' | 'scraper',
+  etsyApiBaseUrl: env('ETSY_API_BASE_URL', 'https://api.etsy.com/v3/application'),
   llmProvider: env('LLM_PROVIDER', 'openai') as 'anthropic' | 'openai',
   headless: envBool('HEADLESS', true),
   defaultCurrency: env('DEFAULT_CURRENCY', 'USD'),
@@ -39,6 +42,10 @@ export const config = {
     delayMaxMs: envInt('SCRAPER_DELAY_MAX_MS', 6000),
     timeoutMs: envInt('SCRAPER_TIMEOUT_MS', 45000),
     maxRetries: envInt('SCRAPER_MAX_RETRIES', 3),
+  },
+  etsyApi: {
+    timeoutMs: envInt('ETSY_API_TIMEOUT_MS', 30_000),
+    maxRetries: envInt('ETSY_API_MAX_RETRIES', 3),
   },
   cache: {
     ttlHours: envInt('SCRAPE_CACHE_TTL_HOURS', 24),

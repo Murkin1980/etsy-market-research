@@ -1,8 +1,8 @@
 # Etsy Market Research
 
-Production-ready Node.js/TypeScript pipeline for researching digital-product niches on Etsy. It collects search and listing evidence, normalizes currencies and listing data, calculates transparent opportunity signals, exports reproducible reports, and can optionally add analysis through OpenAI or Anthropic.
+Production-ready Node.js/TypeScript pipeline for researching digital-product niches through the official Etsy Open API v3. It collects search and listing evidence, normalizes currencies and listing data, calculates transparent opportunity signals, exports reproducible reports, and can optionally add analysis through OpenAI or Anthropic.
 
-> Use the tool responsibly. Automated access can be restricted by Etsy; comply with Etsy's Terms of Use and `robots.txt`. The scraper uses low concurrency, randomized delays, retries, caching, and block detection, but those controls do not grant permission to scrape.
+> Use the tool responsibly and comply with Etsy's API Terms of Use. The default production data source is the official API. The legacy browser collector remains available only as an explicit compatibility mode and must not be used to sidestep API access controls.
 
 ## Requirements
 
@@ -26,7 +26,18 @@ npm.cmd run playwright:install
 Copy-Item .env.example .env
 ```
 
-The CLI works without an LLM key. Set `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` only when using `--use-llm`. Production API mode also requires a random `API_KEY` of at least 24 characters; 32+ is recommended.
+The CLI works without an LLM key. Set `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` only when using `--use-llm`. Market research requires `ETSY_API_KEY` in `keystring:shared_secret` format. The production web server separately requires a random `API_KEY` of at least 24 characters; 32+ is recommended.
+
+## Etsy Open API setup
+
+1. Register an application at <https://www.etsy.com/developers/your-apps>.
+2. Copy its keystring and shared secret.
+3. Set `ETSY_API_KEY=<keystring>:<shared_secret>` in `.env` or Secret Manager.
+4. Keep `ETSY_DATA_SOURCE=api` and restart the service.
+
+Public active-listing search uses application authentication and does not require a member OAuth token. Etsy may require an approved access level for marketplace-wide use. The client searches `/v3/application/listings/active`, enriches up to 100 listing IDs per batch through `/v3/application/listings/batch`, honors API rate limits, and never writes the Etsy credential to reports or logs.
+
+The term "Etsy" is a trademark of Etsy, Inc. This application uses the Etsy API but is not endorsed or certified by Etsy, Inc.
 
 ## Run research
 
@@ -46,13 +57,13 @@ Important CLI options:
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `--query` | required | Etsy search phrase |
-| `--pages` | `2` | Search-result pages (1–10 through the API) |
+| `--pages` | `2` | API result batches (1–10, up to 100 listings each) |
 | `--max-listings` | `80` | Listings to process |
 | `--currency` | `USD` | Reporting currency |
-| `--country` | `US` | Browser region |
-| `--language` | `en-US` | Browser locale |
-| `--concurrency` | `2` | Parallel browser work |
-| `--delay-min` / `--delay-max` | `2500` / `6000` | Random delay range in milliseconds |
+| `--country` | `US` | Buyer country for Etsy price calculation |
+| `--language` | `en-US` | Compatibility-mode browser locale |
+| `--concurrency` | `2` | Compatibility-mode parallel browser work |
+| `--delay-min` / `--delay-max` | `2500` / `6000` | Compatibility-mode delay range |
 | `--use-llm` | `false` | Add OpenAI/Anthropic analysis |
 | `--resume` | `false` | Resume from checkpoint |
 
@@ -116,7 +127,7 @@ The API validates body size and fields, limits requests by client IP, caps the j
 ## Quality gates
 
 ```bash
-npm run check       # typecheck + lint + 84 tests + build
+npm run check       # typecheck + lint + 88 tests + build
 npm run smoke:api   # health, auth, and validation smoke test
 npm audit --audit-level=high
 ```
@@ -152,6 +163,9 @@ curl http://127.0.0.1:3000/health
 
 | Variable | Production baseline |
 | --- | --- |
+| `ETSY_API_KEY` | Etsy `keystring:shared_secret` stored in Secret Manager |
+| `ETSY_DATA_SOURCE` | `api` |
+| `ETSY_API_TIMEOUT_MS` | `30000` |
 | `SCRAPER_CONCURRENCY` | `2` |
 | `SCRAPER_DELAY_MIN_MS` / `MAX` | `2500` / `6000` |
 | `API_KEY` | Random 32+ character secret |

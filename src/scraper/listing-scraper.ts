@@ -45,6 +45,7 @@ export interface ListingScrapeResult {
     popularNow: boolean;
   };
   isDigital: boolean;
+  productType?: 'digital' | 'physical' | 'unknown';
   relatedSearches: string[];
   tags: string[];
   breadcrumbs: string[];
