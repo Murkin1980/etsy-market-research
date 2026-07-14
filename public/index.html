@@ -42,7 +42,7 @@
             <i data-lucide="key-round" aria-hidden="true"></i><span>API-доступ</span>
           </button>
         </div>
-        <p class="version-label">Production · v1.1.0</p>
+        <p class="version-label">Production · v1.3.0</p>
       </div>
     </aside>
 
@@ -141,6 +141,15 @@
               <span class="step-number">01</span>
               <div><p class="eyebrow">Параметры</p><h2>Сформулируйте исследование</h2><p>Начните с небольшого объёма. После проверки результата можно увеличить охват.</p></div>
             </div>
+
+            <section class="integration-status" id="etsyApiPanel" aria-labelledby="etsyApiPanelTitle">
+              <span class="integration-mark" id="etsyApiStatusMark"><i data-lucide="key-round" aria-hidden="true"></i></span>
+              <div class="integration-copy">
+                <strong id="etsyApiPanelTitle">Etsy Open API</strong>
+                <span id="etsyApiStatusText">Проверяем подключение…</span>
+              </div>
+              <button class="secondary-button" id="etsyApiSettingsButton" type="button"><i data-lucide="settings-2" aria-hidden="true"></i><span>Настроить</span></button>
+            </section>
 
             <div class="field-group prominent-field">
               <label for="queryInput">Поисковый запрос</label>
@@ -248,6 +257,28 @@
       <div class="field-group"><label for="apiKeyInput">Production API key</label><div class="input-with-action"><input id="apiKeyInput" type="password" minlength="24" autocomplete="off" spellcheck="false" placeholder="Вставьте ключ из Secret Manager"><button class="icon-button" id="toggleKeyButton" type="button" aria-label="Показать ключ"><i data-lucide="eye" aria-hidden="true"></i></button></div><p class="field-error" id="accessError" role="alert" hidden></p></div>
       <div class="dialog-actions"><button class="secondary-button" id="readOnlyButton" type="button">Только статус</button><button class="primary-button" id="connectButton" type="submit"><i data-lucide="plug-zap" aria-hidden="true"></i><span>Подключиться</span></button></div>
       <div class="dialog-security"><i data-lucide="lock-keyhole" aria-hidden="true"></i><span>Ключ не записывается в cookies, URL или журналы сервера.</span></div>
+    </form>
+  </dialog>
+
+  <dialog class="access-dialog" id="etsyApiDialog" aria-labelledby="etsyApiDialogTitle">
+    <form method="dialog" id="etsyApiForm">
+      <div class="dialog-mark"><i data-lucide="key-round" aria-hidden="true"></i></div>
+      <p class="eyebrow">Источник данных</p>
+      <h2 id="etsyApiDialogTitle">Подключить Etsy Open API</h2>
+      <p>Введите данные приложения Etsy. Перед сохранением сервер проверит их через официальный API.</p>
+      <div class="credential-fields">
+        <div class="field-group">
+          <label for="etsyKeystringInput">Keystring</label>
+          <input id="etsyKeystringInput" type="text" minlength="8" maxlength="128" autocomplete="off" spellcheck="false" required placeholder="Ключ приложения Etsy">
+        </div>
+        <div class="field-group">
+          <label for="etsySharedSecretInput">Shared secret</label>
+          <div class="input-with-action"><input id="etsySharedSecretInput" type="password" minlength="8" maxlength="128" autocomplete="new-password" spellcheck="false" required placeholder="Секрет приложения"><button class="icon-button" id="toggleEtsySecretButton" type="button" aria-label="Показать shared secret"><i data-lucide="eye" aria-hidden="true"></i></button></div>
+        </div>
+      </div>
+      <p class="field-error" id="etsyApiError" role="alert" hidden></p>
+      <div class="dialog-actions"><button class="secondary-button" id="cancelEtsyApiButton" type="button">Отмена</button><button class="primary-button" id="saveEtsyApiButton" type="submit"><i data-lucide="shield-check" aria-hidden="true"></i><span>Проверить и сохранить</span></button></div>
+      <div class="dialog-security"><i data-lucide="lock-keyhole" aria-hidden="true"></i><span>Ключ хранится на сервере в зашифрованном виде и никогда не возвращается в браузер.</span></div>
     </form>
   </dialog>
 

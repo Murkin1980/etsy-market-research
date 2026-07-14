@@ -85,6 +85,20 @@ describe('EtsyApiClient', () => {
   it('does not accept an incomplete application key', () => {
     expect(() => new EtsyApiClient({ apiKey: 'keystring-only' })).toThrow(/shared secret/i);
   });
+
+  it('verifies credentials through the official ping endpoint', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ application_id: 123 }));
+    const client = new EtsyApiClient({
+      apiKey: 'keystring:shared-secret',
+      fetchImpl: fetchMock,
+      maxRetries: 0,
+    });
+
+    await client.verifyCredentials();
+    expect(String(fetchMock.mock.calls[0][0])).toBe(
+      'https://api.etsy.com/v3/application/openapi-ping',
+    );
+  });
 });
 
 describe('mapApiListing', () => {

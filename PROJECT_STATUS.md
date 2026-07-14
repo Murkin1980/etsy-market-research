@@ -124,15 +124,17 @@ browser console    PASS (0 errors, 0 warnings on clean load)
 
 ## Stage 9 — Official Etsy Open API v3
 
-Status: **Implementation completed; credential activation pending**
+Status: **Completed; Etsy application activation pending**
 
 - [x] Replace production browser collection with `findAllListingsActive` from the official Etsy Open API v3.
 - [x] Enrich search results in batches of up to 100 through `getListingsByListingIds` with Images, Shop, Videos, and BuyerPrice.
 - [x] Add bounded retries, `Retry-After` handling, timeouts, clear 401/403/429 errors, and secret-safe logging.
 - [x] Map API data into the existing versioned reports while keeping shop proxies separate from listing evidence.
 - [x] Expose non-secret Etsy API readiness in `/health` and disable launches in Signal Lab until the server credential is configured.
-- [x] Add four API regression tests and pass typecheck, lint, 88/88 tests, and build.
-- [ ] Register the Etsy application, add `ETSY_API_KEY=keystring:shared_secret` to Secret Manager, and run the first production API research.
+- [x] Add Etsy credential settings to Signal Lab with official ping verification and encrypted persistent storage.
+- [x] Preserve structured CLI failures so the web panel shows Etsy's actionable error instead of an empty exit-code message.
+- [x] Pass typecheck, lint, 93/93 tests, build, API smoke, desktop/mobile browser checks, and a clean-load console check.
+- [ ] Wait for Etsy to activate the submitted application, then save the active key through Signal Lab and run the first production API research.
 
 Official API flow:
 

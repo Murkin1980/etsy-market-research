@@ -18,6 +18,7 @@
     currentJobId: '',
     pollTimer: null,
     currentView: 'overview',
+    etsyApiStatus: 'missing',
   };
 
   const $ = (id) => document.getElementById(id);
@@ -51,6 +52,18 @@
     modelInput: $('modelInput'),
     llmFields: $('llmFields'),
     submitResearchButton: $('submitResearchButton'),
+    etsyApiPanel: $('etsyApiPanel'),
+    etsyApiStatusMark: $('etsyApiStatusMark'),
+    etsyApiStatusText: $('etsyApiStatusText'),
+    etsyApiSettingsButton: $('etsyApiSettingsButton'),
+    etsyApiDialog: $('etsyApiDialog'),
+    etsyApiForm: $('etsyApiForm'),
+    etsyKeystringInput: $('etsyKeystringInput'),
+    etsySharedSecretInput: $('etsySharedSecretInput'),
+    etsyApiError: $('etsyApiError'),
+    toggleEtsySecretButton: $('toggleEtsySecretButton'),
+    cancelEtsyApiButton: $('cancelEtsyApiButton'),
+    saveEtsyApiButton: $('saveEtsyApiButton'),
     summaryQuery: $('summaryQuery'),
     summaryPages: $('summaryPages'),
     summaryListings: $('summaryListings'),
@@ -217,16 +230,40 @@
     elements.sidebarStatusText.textContent = online ? (state.apiKey ? 'API подключён' : 'Сервер доступен') : 'Сервер недоступен';
   }
 
+  function canLaunchResearch() {
+    return Boolean(state.health) && (
+      state.health.dataSource !== 'etsy-api' || state.etsyApiStatus === 'verified'
+    );
+  }
+
+  function updateEtsyApiUi(health) {
+    const status = health.etsyApiStatus || (health.etsyApiConfigured ? 'configured' : 'missing');
+    state.etsyApiStatus = status;
+    const labels = {
+      verified: 'Подключён и проверен официальным API',
+      checking: 'Проверяем сохранённый ключ…',
+      invalid: 'Ключ отклонён Etsy — замените его',
+      configured: 'Ключ сохранён, ожидается проверка',
+      missing: 'Добавьте keystring и shared secret',
+    };
+    elements.etsyApiStatusText.textContent = labels[status] || labels.missing;
+    elements.etsyApiPanel.classList.toggle('is-verified', status === 'verified');
+    elements.etsyApiPanel.classList.toggle('is-checking', status === 'checking' || status === 'configured');
+    elements.etsyApiPanel.classList.toggle('is-invalid', status === 'invalid');
+    elements.etsyApiSettingsButton.querySelector('span').textContent = status === 'verified' ? 'Заменить ключ' : 'Настроить';
+    elements.submitResearchButton.disabled = !canLaunchResearch();
+    elements.submitResearchButton.title = elements.submitResearchButton.disabled
+      ? 'Сначала подключите и проверьте Etsy Open API'
+      : '';
+  }
+
   async function refreshHealth() {
     try {
       const health = await api('/health', { apiKeyOverride: '' });
       state.health = health;
-      updateConnectionUi(true, health.etsyApiConfigured ? 'Etsy API подключён' : 'Нужен ключ Etsy API');
-      elements.sidebarStatusText.textContent = health.etsyApiConfigured ? 'Etsy API подключён' : 'Нужен ключ Etsy API';
-      elements.submitResearchButton.disabled = health.dataSource === 'etsy-api' && !health.etsyApiConfigured;
-      elements.submitResearchButton.title = elements.submitResearchButton.disabled
-        ? 'Настройте ETSY_API_KEY на сервере перед запуском исследования'
-        : '';
+      updateEtsyApiUi(health);
+      updateConnectionUi(true, state.etsyApiStatus === 'verified' ? 'Etsy API подключён' : 'Требуется настройка Etsy API');
+      elements.sidebarStatusText.textContent = state.etsyApiStatus === 'verified' ? 'Etsy API подключён' : 'Настройте Etsy API';
       $('metricActive').textContent = String(health.activeJobs ?? 0);
       $('metricQueued').textContent = String(health.queuedJobs ?? 0);
       $('metricRetained').textContent = String(health.retainedJobs ?? 0);
@@ -532,7 +569,54 @@
       if (error instanceof ApiError && error.status === 401) openAccessDialog('API-ключ не принят сервером.');
       else showToast('Не удалось запустить исследование', error.message, 'error');
     } finally {
-      elements.submitResearchButton.disabled = false;
+      elements.submitResearchButton.disabled = !canLaunchResearch();
+    }
+  }
+
+  function openEtsyApiDialog() {
+    if (!state.apiKey) {
+      openAccessDialog('Сначала подключите Production API key для изменения настроек.');
+      return;
+    }
+    elements.etsyApiError.hidden = true;
+    elements.etsyKeystringInput.value = '';
+    elements.etsySharedSecretInput.value = '';
+    elements.etsySharedSecretInput.type = 'password';
+    if (!elements.etsyApiDialog.open) elements.etsyApiDialog.showModal();
+    window.setTimeout(() => elements.etsyKeystringInput.focus(), 50);
+  }
+
+  async function saveEtsyApiSettings(event) {
+    event.preventDefault();
+    const keystring = elements.etsyKeystringInput.value.trim();
+    const sharedSecret = elements.etsySharedSecretInput.value.trim();
+    if (!/^[^:\s]{8,128}$/.test(keystring) || !/^[^:\s]{8,128}$/.test(sharedSecret)) {
+      elements.etsyApiError.textContent = 'Оба поля должны содержать не менее 8 символов, без пробелов и двоеточий.';
+      elements.etsyApiError.hidden = false;
+      return;
+    }
+
+    elements.saveEtsyApiButton.disabled = true;
+    elements.etsyApiError.hidden = true;
+    try {
+      await api('/settings/etsy-api', {
+        method: 'PUT',
+        body: JSON.stringify({ keystring, sharedSecret }),
+      });
+      elements.etsyApiForm.reset();
+      elements.etsyApiDialog.close();
+      await refreshHealth();
+      showToast('Etsy API подключён', 'Ключ проверен и сохранён на сервере в зашифрованном виде.');
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        elements.etsyApiDialog.close();
+        openAccessDialog('Production API key больше не действителен.');
+      } else {
+        elements.etsyApiError.textContent = error.message;
+        elements.etsyApiError.hidden = false;
+      }
+    } finally {
+      elements.saveEtsyApiButton.disabled = false;
     }
   }
 
@@ -592,6 +676,17 @@
     }));
     [elements.queryInput, elements.pagesInput, elements.listingsInput, elements.useLlmInput, elements.providerInput].forEach((input) => input.addEventListener('input', updateResearchSummary));
     elements.researchForm.addEventListener('submit', submitResearch);
+    elements.etsyApiSettingsButton.addEventListener('click', openEtsyApiDialog);
+    elements.etsyApiForm.addEventListener('submit', saveEtsyApiSettings);
+    elements.cancelEtsyApiButton.addEventListener('click', () => elements.etsyApiDialog.close());
+    elements.toggleEtsySecretButton.addEventListener('click', () => {
+      const showing = elements.etsySharedSecretInput.type === 'text';
+      elements.etsySharedSecretInput.type = showing ? 'password' : 'text';
+      elements.toggleEtsySecretButton.setAttribute('aria-label', showing ? 'Показать shared secret' : 'Скрыть shared secret');
+      const icon = elements.toggleEtsySecretButton.querySelector('svg');
+      if (icon) icon.outerHTML = `<i data-lucide="${showing ? 'eye' : 'eye-off'}" aria-hidden="true"></i>`;
+      refreshIcons();
+    });
     elements.refreshButton.addEventListener('click', () => void refreshAll());
     elements.accessButton.addEventListener('click', () => openAccessDialog());
     elements.accessForm.addEventListener('submit', connectAccess);

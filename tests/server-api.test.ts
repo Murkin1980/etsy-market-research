@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildCliParams,
   getClientIp,
+  parseEtsyApiSettings,
   parseJsonBody,
   parseResearchJobRequest,
   parseRunResultOutput,
@@ -36,6 +37,20 @@ describe('server API helpers', () => {
 
   it('rejects unknown fields and out-of-range values', () => {
     expect(() => parseResearchJobRequest({ query: 'x', pages: 0, admin: true })).toThrow(RequestBodyError);
+  });
+
+  it('validates Etsy API settings without accepting combined or spaced values', () => {
+    expect(parseEtsyApiSettings({
+      keystring: 'etsy-keystring-1234',
+      sharedSecret: 'shared-secret-9876',
+    })).toEqual({
+      keystring: 'etsy-keystring-1234',
+      sharedSecret: 'shared-secret-9876',
+    });
+    expect(() => parseEtsyApiSettings({
+      keystring: 'key:secret',
+      sharedSecret: 'shared-secret-9876',
+    })).toThrow(RequestBodyError);
   });
 
   it('builds isolated CLI arguments from validated options', () => {

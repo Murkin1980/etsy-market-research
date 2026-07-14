@@ -7,6 +7,7 @@ import {
   buildCliParams,
   getClientIp,
   parseJsonBody,
+  parseEtsyApiSettings,
   parseResearchJobRequest,
   parseRunResultOutput,
   RequestBodyError,
@@ -21,6 +22,8 @@ import {
 import { listRunFiles, resolveRunFile } from './run-files.js';
 import { resolveUiAsset } from './server-ui.js';
 import { closeLogStreams, createChildLogger } from './utils/logger.js';
+import { EtsyApiClient, EtsyApiError } from './etsy-api/client.js';
+import { EncryptedCredentialStore } from './storage/encrypted-credential.js';
 
 const log = createChildLogger('server');
 
@@ -28,9 +31,14 @@ const rateLimitMap = new Map<string, number[]>();
 const RATE_WINDOW_MS = 60_000;
 const MAX_CHILD_OUTPUT_BYTES = 1_000_000;
 const MIN_PRODUCTION_API_KEY_LENGTH = 24;
-const APP_VERSION = '1.2.0';
+const APP_VERSION = '1.3.0';
 const activeChildren = new Set<ReturnType<typeof spawn>>();
 let rateLimitChecks = 0;
+let runtimeEtsyApiKey = config.etsyApiKey;
+let etsyApiStatus: 'missing' | 'checking' | 'verified' | 'invalid' = runtimeEtsyApiKey
+  ? 'checking'
+  : 'missing';
+let credentialStore: EncryptedCredentialStore | null = null;
 
 function checkRateLimit(ip: string): boolean {
   const limit = config.server.rateLimitPerMinute;
@@ -81,7 +89,10 @@ function executeCliJob(job: ResearchJob): Promise<RunResultPayload> {
     const child = spawn('node', buildCliParams(job.id, job.request), {
       cwd: process.cwd(),
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env },
+      env: {
+        ...process.env,
+        ...(runtimeEtsyApiKey ? { ETSY_API_KEY: runtimeEtsyApiKey } : {}),
+      },
     });
     activeChildren.add(child);
 
@@ -101,22 +112,31 @@ function executeCliJob(job: ResearchJob): Promise<RunResultPayload> {
       settled = true;
       activeChildren.delete(child);
 
-      if (spawnError || code !== 0) {
-        reject(spawnError ?? new Error(`Exit code ${code}: ${stderr.slice(-500)}`));
+      if (spawnError) {
+        reject(spawnError);
         return;
       }
 
       const result = parseRunResultOutput(stdout);
+      if (result) {
+        if (result.status === 'completed') {
+          log.info({ jobId: job.id, runDir: result.runDir }, 'Job completed');
+        } else {
+          log.error({ jobId: job.id, error: result.error }, 'Job returned a failed result');
+        }
+        resolve(result);
+        return;
+      }
+
+      if (code !== 0) {
+        reject(new Error(`Exit code ${code}: ${stderr.slice(-500)}`));
+        return;
+      }
+
       if (!result) {
         reject(new Error('CLI completed without a valid structured result'));
         return;
       }
-      if (result.status === 'completed') {
-        log.info({ jobId: job.id, runDir: result.runDir }, 'Job completed');
-      } else {
-        log.error({ jobId: job.id, error: result.error }, 'Job returned a failed result');
-      }
-      resolve(result);
     };
 
     child.on('close', (code: number | null) => finish(code));
@@ -173,7 +193,7 @@ function applyCors(req: http.IncomingMessage, res: http.ServerResponse): void {
     res.setHeader('Access-Control-Allow-Origin', configuredOrigin === '*' ? '*' : configuredOrigin);
     res.setHeader('Vary', 'Origin');
   }
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 }
 
@@ -182,6 +202,32 @@ if (config.server.requireApiKey && !config.server.apiKey) {
 }
 if (config.server.requireApiKey && config.server.apiKey.length < MIN_PRODUCTION_API_KEY_LENGTH) {
   throw new Error(`API_KEY must contain at least ${MIN_PRODUCTION_API_KEY_LENGTH} characters`);
+}
+
+if (config.server.apiKey.length >= MIN_PRODUCTION_API_KEY_LENGTH) {
+  try {
+    credentialStore = new EncryptedCredentialStore(
+      path.join(config.paths.settings, 'etsy-api.enc'),
+      config.server.apiKey,
+    );
+    const storedKey = credentialStore.load();
+    if (storedKey) {
+      runtimeEtsyApiKey = storedKey;
+      etsyApiStatus = 'checking';
+    }
+  } catch (error) {
+    log.error({ error: (error as Error).message }, 'Could not load encrypted Etsy API settings');
+  }
+}
+
+async function verifyEtsyApiKey(apiKey: string): Promise<void> {
+  const client = new EtsyApiClient({
+    apiKey,
+    baseUrl: config.etsyApiBaseUrl,
+    timeoutMs: config.etsyApi.timeoutMs,
+    maxRetries: 0,
+  });
+  await client.verifyCredentials();
 }
 
 const server = http.createServer(async (req, res) => {
@@ -214,7 +260,8 @@ const server = http.createServer(async (req, res) => {
       maxConcurrent: config.server.maxConcurrentJobs,
       maxQueued: config.server.maxQueuedJobs,
       dataSource: config.etsyDataSource === 'api' ? 'etsy-api' : 'browser-scraper',
-      etsyApiConfigured: Boolean(config.etsyApiKey),
+      etsyApiConfigured: Boolean(runtimeEtsyApiKey),
+      etsyApiStatus,
     });
     return;
   }
@@ -234,6 +281,43 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (url.pathname === '/settings/etsy-api' && req.method === 'GET') {
+    sendJson(res, 200, {
+      configured: Boolean(runtimeEtsyApiKey),
+      status: etsyApiStatus,
+      persistentStorage: Boolean(credentialStore),
+    });
+    return;
+  }
+
+  if (url.pathname === '/settings/etsy-api' && req.method === 'PUT') {
+    if (!credentialStore) {
+      sendJson(res, 503, { error: 'Encrypted credential storage is not available' });
+      return;
+    }
+    try {
+      const body = await parseJsonBody(req, config.server.maxRequestBodyBytes);
+      const settings = parseEtsyApiSettings(body);
+      const candidate = `${settings.keystring}:${settings.sharedSecret}`;
+      await verifyEtsyApiKey(candidate);
+      runtimeEtsyApiKey = credentialStore.save(settings);
+      etsyApiStatus = 'verified';
+      sendJson(res, 200, { configured: true, status: etsyApiStatus });
+    } catch (error) {
+      if (error instanceof RequestBodyError) {
+        sendJson(res, error.statusCode, { error: error.message, details: error.details });
+      } else if (error instanceof EtsyApiError) {
+        sendJson(res, error.status === 401 || error.status === 403 ? 422 : 502, {
+          error: error.message,
+        });
+      } else {
+        log.error({ error: (error as Error).message }, 'Failed to save Etsy API settings');
+        sendJson(res, 500, { error: 'Failed to save Etsy API settings' });
+      }
+    }
+    return;
+  }
+
   if (url.pathname === '/jobs' && req.method === 'GET') {
     const jobs = jobManager.list();
     sendJson(res, 200, { jobs, total: jobs.length });
@@ -244,6 +328,15 @@ const server = http.createServer(async (req, res) => {
     try {
       const body = await parseJsonBody(req, config.server.maxRequestBodyBytes);
       const request = parseResearchJobRequest(body);
+      if (config.etsyDataSource === 'api' && etsyApiStatus !== 'verified') {
+        sendJson(res, 503, {
+          error: etsyApiStatus === 'checking'
+            ? 'Etsy API credential verification is still in progress'
+            : 'Configure and verify Etsy API credentials before starting research',
+          etsyApiStatus,
+        });
+        return;
+      }
       const { job, queuePosition } = jobManager.enqueue(request);
       log.info({ jobId: job.id, query: job.query }, 'Job queued');
 
@@ -341,7 +434,20 @@ server.listen(port, config.server.host, () => {
   console.log('  POST /jobs             - Create a validated research job');
   console.log('  GET  /jobs/:id         - Job status');
   console.log('  GET  /runs             - List completed runs');
+  console.log('  PUT  /settings/etsy-api - Verify and save Etsy API credentials');
   if (config.server.apiKey) console.log('  Auth: Authorization: Bearer <API_KEY>');
+
+  if (runtimeEtsyApiKey) {
+    void verifyEtsyApiKey(runtimeEtsyApiKey)
+      .then(() => {
+        etsyApiStatus = 'verified';
+        log.info('Etsy API credential verified');
+      })
+      .catch((error: Error) => {
+        etsyApiStatus = 'invalid';
+        log.warn({ error: error.message }, 'Etsy API credential verification failed');
+      });
+  }
 });
 
 let shuttingDown = false;
