@@ -74,6 +74,7 @@ export const config = {
     normalizedData: path.resolve('data/normalized'),
     reports: path.resolve('data/reports'),
     checkpoints: path.resolve('data/checkpoints'),
+    settings: path.resolve('data/settings'),
     runs: path.resolve('data/runs'),
     logs: path.resolve('logs'),
   },

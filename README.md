@@ -88,6 +88,7 @@ The schema version is recorded in `run-result.json`, metadata, JSON, and CSV exp
 The production server includes the **Signal Lab** web panel at `/`. It provides:
 
 - API-key connection stored only in the current browser tab;
+- Etsy Open API credential setup with live verification and encrypted persistent storage;
 - validated research-job creation with conservative defaults;
 - live queue/job status and clear blocked/failed states;
 - retained job and stored-run browsing;
@@ -118,16 +119,18 @@ curl -X POST http://127.0.0.1:3000/jobs \
 | `GET /jobs` | bearer | Retained jobs |
 | `POST /jobs` | bearer | Validate and queue research |
 | `GET /jobs/:id` | bearer | Job state and structured result |
+| `GET /settings/etsy-api` | bearer | Non-secret Etsy API readiness |
+| `PUT /settings/etsy-api` | bearer | Verify and encrypt Etsy application credentials |
 | `GET /runs` | bearer | Stored run summaries |
 | `GET /runs/:id/files` | bearer | Allowlisted report-file metadata |
 | `GET /runs/:id/files/:name` | bearer | Download an allowlisted JSON/CSV report |
 
-The API validates body size and fields, limits requests by client IP, caps the job queue, bounds child-process output, and shuts down active workers on `SIGTERM`/`SIGINT`. Configure `TRUST_PROXY=true` only behind a trusted proxy that replaces `X-Forwarded-For`.
+The API validates body size and fields, limits requests by client IP, caps the job queue, bounds child-process output, and shuts down active workers on `SIGTERM`/`SIGINT`. Etsy credentials saved through Signal Lab are verified before persistence, encrypted with AES-256-GCM using a key derived from the production `API_KEY`, and never returned to the browser. Rotating `API_KEY` requires entering the Etsy credential again. Configure `TRUST_PROXY=true` only behind a trusted proxy that replaces `X-Forwarded-For`.
 
 ## Quality gates
 
 ```bash
-npm run check       # typecheck + lint + 88 tests + build
+npm run check       # typecheck + lint + 93 tests + build
 npm run smoke:api   # health, auth, and validation smoke test
 npm audit --audit-level=high
 ```

@@ -28,6 +28,13 @@ export const ResearchJobRequestSchema = z.object({
 
 export type ResearchJobRequest = z.infer<typeof ResearchJobRequestSchema>;
 
+export const EtsyApiSettingsSchema = z.object({
+  keystring: z.string().trim().min(8).max(128).regex(/^[^:\s]+$/),
+  sharedSecret: z.string().trim().min(8).max(128).regex(/^[^:\s]+$/),
+}).strict();
+
+export type EtsyApiSettings = z.infer<typeof EtsyApiSettingsSchema>;
+
 export interface RunResultPayload {
   status: 'completed' | 'failed';
   query: string;
@@ -73,6 +80,14 @@ export function parseResearchJobRequest(input: unknown): ResearchJobRequest {
   const parsed = ResearchJobRequestSchema.safeParse(input);
   if (!parsed.success) {
     throw new RequestBodyError('Invalid research job request', 400, parsed.error.flatten());
+  }
+  return parsed.data;
+}
+
+export function parseEtsyApiSettings(input: unknown): EtsyApiSettings {
+  const parsed = EtsyApiSettingsSchema.safeParse(input);
+  if (!parsed.success) {
+    throw new RequestBodyError('Invalid Etsy API settings', 400, parsed.error.flatten());
   }
   return parsed.data;
 }
