@@ -98,3 +98,15 @@ Status: **Completed**
 - [x] Deploy the blocked-search result fix and verify production reports `blockedCount=1` with a failed run status.
 - [x] Add a production email notification channel and a high-CPU alert policy.
 - [x] Add a public HTTPS `/health` uptime check from three regions with email failure notification.
+
+## Stage 8 — Signal Lab web panel
+
+Status: **Ready for production deployment**
+
+- [x] Add a responsive operational dashboard, research form, job polling, run history, and result details.
+- [x] Keep API credentials tab-scoped and add explicit connect, disconnect, unauthorized, and read-only states.
+- [x] Add allowlisted authenticated JSON/CSV report downloads with traversal protection.
+- [x] Self-host Lucide `1.24.0`, Onest Cyrillic, and Instrument Serif assets under a strict CSP.
+- [x] Verify desktop and 390 px mobile layouts, keyboard-accessible semantics, empty/error states, and zero clean-load console errors.
+- [x] Pass typecheck, lint, 84/84 tests, build, and local production-server browser checks.
+- [ ] Deploy release `v1.1.0` to Google Cloud and verify the complete public workflow.

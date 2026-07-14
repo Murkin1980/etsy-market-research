@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#171512">
+  <meta name="description" content="Панель управления исследованиями рынка Etsy">
+  <title>Etsy Signal Lab</title>
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/assets/app.css">
+  <script src="/assets/lucide.min.js" defer></script>
+  <script src="/assets/app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Перейти к содержимому</a>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="Главная навигация">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">S</span>
+        <span class="brand-copy"><strong>Signal Lab</strong><small>Etsy intelligence</small></span>
+      </div>
+
+      <nav class="nav-list" aria-label="Разделы панели">
+        <button class="nav-item is-active" type="button" data-view-target="overview" aria-current="page">
+          <i data-lucide="layout-dashboard" aria-hidden="true"></i><span>Обзор</span>
+        </button>
+        <button class="nav-item" type="button" data-view-target="research">
+          <i data-lucide="scan-search" aria-hidden="true"></i><span>Новое исследование</span>
+        </button>
+        <button class="nav-item" type="button" data-view-target="runs">
+          <i data-lucide="folder-kanban" aria-hidden="true"></i><span>Запуски и отчёты</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-foot">
+        <div class="connection-card">
+          <div class="connection-line">
+            <span class="status-dot" id="sidebarStatusDot" aria-hidden="true"></span>
+            <span id="sidebarStatusText">Проверяем сервер</span>
+          </div>
+          <button class="text-button" id="accessButton" type="button">
+            <i data-lucide="key-round" aria-hidden="true"></i><span>API-доступ</span>
+          </button>
+        </div>
+        <p class="version-label">Production · v1.1.0</p>
+      </div>
+    </aside>
+
+    <main id="main-content" class="main-content" tabindex="-1">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow" id="pageEyebrow">Рабочее пространство</p>
+          <h1 id="pageTitle">Обзор исследований</h1>
+        </div>
+        <div class="topbar-actions">
+          <div class="live-state" id="liveState" aria-live="polite">
+            <span class="status-dot" aria-hidden="true"></span>
+            <span>Соединение…</span>
+          </div>
+          <button class="icon-button" id="refreshButton" type="button" aria-label="Обновить данные">
+            <i data-lucide="refresh-cw" aria-hidden="true"></i>
+          </button>
+          <button class="primary-button compact" type="button" data-view-target="research">
+            <i data-lucide="plus" aria-hidden="true"></i><span>Запустить</span>
+          </button>
+        </div>
+      </header>
+
+      <section class="view is-active" id="view-overview" data-view="overview" aria-labelledby="pageTitle">
+        <div class="hero-grid">
+          <div class="hero-copy">
+            <p class="hero-kicker"><span></span> MARKET SIGNALS / LIVE</p>
+            <h2>Рынок не угадывают.<br><em>Его измеряют.</em></h2>
+            <p>Запускайте контролируемые исследования Etsy, следите за очередью и превращайте собранные данные в понятные отчёты.</p>
+            <div class="hero-actions">
+              <button class="primary-button" type="button" data-view-target="research">
+                <i data-lucide="scan-search" aria-hidden="true"></i><span>Новое исследование</span>
+              </button>
+              <button class="secondary-button" type="button" data-view-target="runs">
+                <i data-lucide="file-chart-column" aria-hidden="true"></i><span>Открыть отчёты</span>
+              </button>
+            </div>
+          </div>
+          <div class="signal-orbit" aria-label="Состояние исследовательского контура">
+            <div class="orbit orbit-one"></div>
+            <div class="orbit orbit-two"></div>
+            <div class="orbit-center">
+              <i data-lucide="radar" aria-hidden="true"></i>
+              <strong id="orbitValue">—</strong>
+              <span>активных задач</span>
+            </div>
+            <span class="orbit-node node-a"></span>
+            <span class="orbit-node node-b"></span>
+            <span class="orbit-node node-c"></span>
+          </div>
+        </div>
+
+        <div class="metrics-strip" aria-label="Состояние системы">
+          <article><span>Активно</span><strong id="metricActive">—</strong><small>из <span id="metricMaxConcurrent">—</span> потоков</small></article>
+          <article><span>В очереди</span><strong id="metricQueued">—</strong><small>ожидают запуска</small></article>
+          <article><span>Сохранено</span><strong id="metricRetained">—</strong><small>последних заданий</small></article>
+          <article><span>Uptime</span><strong id="metricUptime">—</strong><small>без перезапуска</small></article>
+        </div>
+
+        <div class="overview-grid">
+          <section class="work-section">
+            <div class="section-heading">
+              <div><p class="eyebrow">Последняя активность</p><h2>Задания</h2></div>
+              <button class="text-button dark" type="button" data-view-target="runs">Смотреть все <i data-lucide="arrow-up-right" aria-hidden="true"></i></button>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Запрос</th><th>Статус</th><th>Создан</th><th class="align-right">Результат</th></tr></thead>
+                <tbody id="overviewJobsBody"></tbody>
+              </table>
+              <div class="empty-state" id="overviewEmpty" hidden>
+                <i data-lucide="telescope" aria-hidden="true"></i>
+                <strong>Исследований пока нет</strong>
+                <span>Запустите первый запрос — он появится здесь.</span>
+              </div>
+            </div>
+          </section>
+
+          <aside class="system-rail">
+            <div class="section-heading"><div><p class="eyebrow">Контур</p><h2>Production</h2></div><span class="mini-badge">LIVE</span></div>
+            <ol class="system-list">
+              <li><span class="system-icon"><i data-lucide="globe-2" aria-hidden="true"></i></span><div><strong>HTTPS endpoint</strong><small>34-18-107-101.sslip.io</small></div><i data-lucide="check" aria-hidden="true"></i></li>
+              <li><span class="system-icon"><i data-lucide="shield-check" aria-hidden="true"></i></span><div><strong>TLS и защита</strong><small>Let’s Encrypt · Caddy</small></div><i data-lucide="check" aria-hidden="true"></i></li>
+              <li><span class="system-icon"><i data-lucide="activity" aria-hidden="true"></i></span><div><strong>Мониторинг</strong><small>3 региона · 60 секунд</small></div><i data-lucide="check" aria-hidden="true"></i></li>
+              <li><span class="system-icon"><i data-lucide="database-backup" aria-hidden="true"></i></span><div><strong>Снимки диска</strong><small>Ежедневно · 14 дней</small></div><i data-lucide="check" aria-hidden="true"></i></li>
+            </ol>
+            <div class="policy-note"><i data-lucide="info" aria-hidden="true"></i><p><strong>Контролируемый режим.</strong> При блокировке Etsy сбор останавливается без попыток обхода.</p></div>
+          </aside>
+        </div>
+      </section>
+
+      <section class="view" id="view-research" data-view="research" hidden>
+        <div class="research-layout">
+          <form class="research-form" id="researchForm" novalidate>
+            <div class="form-intro">
+              <span class="step-number">01</span>
+              <div><p class="eyebrow">Параметры</p><h2>Сформулируйте исследование</h2><p>Начните с небольшого объёма. После проверки результата можно увеличить охват.</p></div>
+            </div>
+
+            <div class="field-group prominent-field">
+              <label for="queryInput">Поисковый запрос</label>
+              <div class="input-with-icon"><i data-lucide="search" aria-hidden="true"></i><input id="queryInput" name="query" type="text" maxlength="200" required placeholder="Например: digital wedding planner" autocomplete="off"></div>
+              <div class="query-presets" aria-label="Примеры запросов">
+                <button type="button" data-query-preset="digital planner">digital planner</button>
+                <button type="button" data-query-preset="Notion template">Notion template</button>
+                <button type="button" data-query-preset="wedding invitation">wedding invitation</button>
+              </div>
+              <p class="field-error" id="queryError" role="alert" hidden>Введите поисковую фразу.</p>
+            </div>
+
+            <div class="range-grid">
+              <div class="field-group range-field">
+                <div class="label-row"><label for="pagesInput">Страницы выдачи</label><output id="pagesOutput" for="pagesInput">1</output></div>
+                <input id="pagesInput" name="pages" type="range" min="1" max="10" value="1">
+                <div class="range-hints"><span>Быстро</span><span>Глубоко</span></div>
+              </div>
+              <div class="field-group range-field">
+                <div class="label-row"><label for="listingsInput">Максимум товаров</label><output id="listingsOutput" for="listingsInput">10</output></div>
+                <input id="listingsInput" name="maxListings" type="range" min="5" max="500" step="5" value="10">
+                <div class="range-hints"><span>5</span><span>500</span></div>
+              </div>
+            </div>
+
+            <div class="select-grid">
+              <div class="field-group"><label for="currencyInput">Валюта отчёта</label><select id="currencyInput" name="currency"><option value="USD">USD · доллар</option><option value="EUR">EUR · евро</option><option value="GBP">GBP · фунт</option><option value="KZT">KZT · тенге</option></select></div>
+              <div class="field-group"><label for="countryInput">Регион Etsy</label><select id="countryInput" name="country"><option value="US">США</option><option value="GB">Великобритания</option><option value="DE">Германия</option><option value="CA">Канада</option><option value="AU">Австралия</option></select></div>
+              <div class="field-group"><label for="languageInput">Язык браузера</label><select id="languageInput" name="language"><option value="en-US">English (US)</option><option value="en-GB">English (UK)</option><option value="de-DE">Deutsch</option></select></div>
+            </div>
+
+            <details class="advanced-options">
+              <summary><span><i data-lucide="sliders-horizontal" aria-hidden="true"></i>AI-анализ и дополнительные параметры</span><i data-lucide="chevron-down" aria-hidden="true"></i></summary>
+              <div class="advanced-content">
+                <label class="switch-row" for="useLlmInput"><span><strong>Добавить AI-анализ</strong><small>Создать конкурентное резюме после сбора данных</small></span><span class="switch"><input id="useLlmInput" name="useLlm" type="checkbox"><span aria-hidden="true"></span></span></label>
+                <div class="select-grid" id="llmFields" hidden>
+                  <div class="field-group"><label for="providerInput">Провайдер</label><select id="providerInput" name="llmProvider"><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option></select></div>
+                  <div class="field-group span-two"><label for="modelInput">Модель — необязательно</label><input id="modelInput" name="llmModel" type="text" maxlength="100" placeholder="Использовать модель по умолчанию"></div>
+                </div>
+              </div>
+            </details>
+
+            <div class="form-submit-row">
+              <div class="safety-hint"><i data-lucide="shield" aria-hidden="true"></i><span>Низкая параллельность и автоматическая остановка при блокировке.</span></div>
+              <button class="primary-button launch-button" id="submitResearchButton" type="submit"><i data-lucide="play" aria-hidden="true"></i><span>Запустить исследование</span></button>
+            </div>
+          </form>
+
+          <aside class="launch-rail">
+            <div class="launch-summary">
+              <p class="eyebrow">План запуска</p>
+              <div class="summary-query" id="summaryQuery">Новый поисковый сигнал</div>
+              <dl><div><dt>Страницы</dt><dd id="summaryPages">1</dd></div><div><dt>Лимит</dt><dd id="summaryListings">10 товаров</dd></div><div><dt>AI-анализ</dt><dd id="summaryAi">Выключен</dd></div><div><dt>Режим</dt><dd>Контролируемый</dd></div></dl>
+              <div class="effort-scale"><span>Ожидаемая нагрузка</span><div><i id="effortBar"></i></div><strong id="effortLabel">Низкая</strong></div>
+            </div>
+
+            <div class="current-job" id="currentJobPanel" hidden aria-live="polite">
+              <div class="current-job-head"><span class="job-pulse" aria-hidden="true"></span><div><small>Текущий запуск</small><strong id="currentJobQuery">—</strong></div><span class="status-badge" id="currentJobStatus">—</span></div>
+              <div class="indeterminate-track" id="jobProgressTrack"><span></span></div>
+              <dl><div><dt>Идентификатор</dt><dd id="currentJobId">—</dd></div><div><dt>Прошло</dt><dd id="currentJobElapsed">—</dd></div></dl>
+              <p class="job-message" id="currentJobMessage">Подготавливаем исследование…</p>
+              <button class="secondary-button full-width" id="openJobButton" type="button"><i data-lucide="panel-right-open" aria-hidden="true"></i><span>Открыть детали</span></button>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <section class="view" id="view-runs" data-view="runs" hidden>
+        <div class="runs-toolbar">
+          <div class="segmented-control" role="group" aria-label="Источник данных">
+            <button class="is-active" type="button" data-run-mode="jobs">Задания <span id="jobsCount">0</span></button>
+            <button type="button" data-run-mode="runs">Отчёты <span id="runsCount">0</span></button>
+          </div>
+          <label class="search-filter" for="runSearch"><i data-lucide="search" aria-hidden="true"></i><span class="sr-only">Фильтр запусков</span><input id="runSearch" type="search" placeholder="Найти по запросу"></label>
+        </div>
+
+        <div class="runs-workspace">
+          <section class="runs-list" aria-label="Список запусков">
+            <div class="runs-list-head"><span>Запрос и время</span><span>Статус</span><span>Сигналы</span><span></span></div>
+            <div id="runsList"></div>
+            <div class="empty-state large" id="runsEmpty" hidden><i data-lucide="folder-search" aria-hidden="true"></i><strong>Ничего не найдено</strong><span>Измените фильтр или запустите новое исследование.</span></div>
+          </section>
+
+          <aside class="detail-panel" id="detailPanel" aria-live="polite">
+            <div class="detail-empty" id="detailEmpty"><i data-lucide="mouse-pointer-2" aria-hidden="true"></i><strong>Выберите запуск</strong><span>Здесь появятся показатели, ошибки и доступные файлы.</span></div>
+            <div id="detailContent" hidden>
+              <div class="detail-head"><div><p class="eyebrow">Результат</p><h2 id="detailQuery">—</h2></div><span class="status-badge" id="detailStatus">—</span></div>
+              <p class="detail-error" id="detailError" hidden></p>
+              <div class="result-metrics"><div><span>Найдено</span><strong id="detailFound">—</strong></div><div><span>Успешно</span><strong id="detailSuccess">—</strong></div><div><span>Частично</span><strong id="detailPartial">—</strong></div><div><span>Блокировки</span><strong id="detailBlocked">—</strong></div></div>
+              <dl class="detail-facts"><div><dt>Средняя цена</dt><dd id="detailAverage">—</dd></div><div><dt>Медианная цена</dt><dd id="detailMedian">—</dd></div><div><dt>Длительность</dt><dd id="detailDuration">—</dd></div><div><dt>Завершено</dt><dd id="detailCompleted">—</dd></div></dl>
+              <div class="files-section"><div class="section-heading"><div><p class="eyebrow">Экспорт</p><h3>Файлы отчёта</h3></div></div><div id="runFiles" class="file-list"></div><p class="files-empty" id="filesEmpty" hidden>Файлы появятся после завершения сбора.</p></div>
+            </div>
+          </aside>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <dialog class="access-dialog" id="accessDialog" aria-labelledby="accessTitle">
+    <form method="dialog" id="accessForm">
+      <div class="dialog-mark"><i data-lucide="key-round" aria-hidden="true"></i></div>
+      <p class="eyebrow">Защищённое соединение</p>
+      <h2 id="accessTitle">Подключить API-доступ</h2>
+      <p>Ключ нужен для запуска исследований и просмотра отчётов. Он хранится только в текущей вкладке браузера.</p>
+      <div class="field-group"><label for="apiKeyInput">Production API key</label><div class="input-with-action"><input id="apiKeyInput" type="password" minlength="24" autocomplete="off" spellcheck="false" placeholder="Вставьте ключ из Secret Manager"><button class="icon-button" id="toggleKeyButton" type="button" aria-label="Показать ключ"><i data-lucide="eye" aria-hidden="true"></i></button></div><p class="field-error" id="accessError" role="alert" hidden></p></div>
+      <div class="dialog-actions"><button class="secondary-button" id="readOnlyButton" type="button">Только статус</button><button class="primary-button" id="connectButton" type="submit"><i data-lucide="plug-zap" aria-hidden="true"></i><span>Подключиться</span></button></div>
+      <div class="dialog-security"><i data-lucide="lock-keyhole" aria-hidden="true"></i><span>Ключ не записывается в cookies, URL или журналы сервера.</span></div>
+    </form>
+  </dialog>
+
+  <div class="toast-region" id="toastRegion" aria-live="polite" aria-atomic="true"></div>
+</body>
+</html>

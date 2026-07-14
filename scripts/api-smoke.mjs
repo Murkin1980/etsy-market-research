@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 
 const port = 3199;
 const baseUrl = `http://127.0.0.1:${port}`;
 const apiKey = 'stage6-smoke-key-at-least-32-characters';
+const packageVersion = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 let output = '';
 
 const server = spawn(process.execPath, ['dist/server.js'], {
@@ -44,7 +46,16 @@ try {
   const health = await waitForHealth();
   const healthBody = await health.json();
   assert.equal(healthBody.status, 'ok');
-  assert.equal(healthBody.version, '1.0.0');
+  assert.equal(healthBody.version, packageVersion);
+
+  const panel = await fetch(`${baseUrl}/`);
+  assert.equal(panel.status, 200);
+  assert.match(panel.headers.get('content-security-policy') ?? '', /default-src 'self'/);
+  assert.match(await panel.text(), /Etsy Signal Lab/);
+
+  const panelStyles = await fetch(`${baseUrl}/assets/app.css`);
+  assert.equal(panelStyles.status, 200);
+  assert.match(panelStyles.headers.get('content-type') ?? '', /text\/css/);
 
   const unauthorized = await fetch(`${baseUrl}/jobs`);
   assert.equal(unauthorized.status, 401);
@@ -59,7 +70,7 @@ try {
   });
   assert.equal(invalidJob.status, 400);
 
-  console.log('API smoke passed: health, authentication, and validation');
+  console.log('API smoke passed: panel, health, authentication, and validation');
 } finally {
   const exitPromise = new Promise((resolve) => {
     if (server.exitCode !== null) resolve(server.exitCode);
