@@ -21,6 +21,7 @@ Deployment started on 2026-07-14. This document records resource names and opera
 | Public hostname | `34-18-107-101.sslip.io` |
 | TLS proxy | Caddy with automatic certificate renewal |
 | Uptime check | `Etsy Production HTTPS Health` (three regions, every minute) |
+| Deployed release | `v1.1.0` / commit `4105147` |
 
 ## Security state
 
@@ -78,6 +79,8 @@ https://34-18-107-101.sslip.io/
 ```
 
 The panel keeps the API key in browser `sessionStorage`, sends it only in same-origin bearer requests, and clears it when the tab session ends. Report downloads are restricted to the server-side allowlist in `src/run-files.ts`.
+
+The `v1.1.0` rollout was verified on production with a healthy rebuilt container, public HTTPS/CSP checks, authenticated job/run access, and allowlisted report discovery. The rollback image is tagged locally on the VM as `etsy-research-etsy-research:rollback-08bcf23`.
 
 Service and container status:
 
