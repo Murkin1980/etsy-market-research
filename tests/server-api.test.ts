@@ -7,8 +7,10 @@ import {
   parseEtsyApiSettings,
   parseAiAnalysisRequest,
   parseJsonBody,
+  parseCheckoutRequest,
   parseLoginRequest,
   parseRegisterRequest,
+  parsePlanChangeRequest,
   parseResearchJobRequest,
   parseRunResultOutput,
   RequestBodyError,
@@ -73,6 +75,13 @@ describe('server API helpers', () => {
       name: 'Member',
       inviteCode: 'invite_12345678901234567890',
     })).toMatchObject({ name: 'Member' });
+  });
+
+  it('validates plan changes and paid checkout plans', () => {
+    expect(parsePlanChangeRequest({ planId: 'trial' })).toEqual({ planId: 'trial' });
+    expect(parseCheckoutRequest({ planId: 'pro' })).toEqual({ planId: 'pro' });
+    expect(() => parseCheckoutRequest({ planId: 'trial' })).toThrow(RequestBodyError);
+    expect(() => parsePlanChangeRequest({ planId: 'enterprise' })).toThrow(RequestBodyError);
   });
 
   it('builds isolated CLI arguments from validated options', () => {

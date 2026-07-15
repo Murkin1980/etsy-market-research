@@ -398,6 +398,39 @@ input[type="range"] { width: 100%; height: 5px; margin: 9px 0 3px; accent-color:
 .file-button > svg { width: 15px; color: var(--ink-faint); }
 .files-empty { color: var(--ink-faint); font-size: 10px; }
 
+.billing-summary { display: grid; grid-template-columns: minmax(0,1.35fr) minmax(260px,.65fr); gap: 20px; }
+.current-plan-panel, .billing-safety { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
+.current-plan-panel { padding: 25px; }
+.current-plan-name { display: flex; align-items: end; justify-content: space-between; gap: 20px; padding: 18px 0; border-bottom: 1px solid var(--line); }
+.current-plan-name strong { font-family: var(--font-display); font-size: 34px; font-weight: 400; letter-spacing: -.035em; }
+.current-plan-name span { color: var(--ink-soft); font-size: 11px; }
+.quota-list { display: grid; gap: 17px; margin-top: 20px; }
+.quota-list > div > div { display: flex; justify-content: space-between; gap: 16px; margin-bottom: 7px; }
+.quota-list strong, .quota-list span { font-size: 10px; }
+.quota-list span { color: var(--ink-soft); }
+.quota-track { display: block; height: 7px; overflow: hidden; background: var(--paper-deep); border-radius: 999px; }
+.quota-track i { display: block; width: 0; height: 100%; background: var(--orange); border-radius: inherit; transition: width .25s ease; }
+.billing-period { margin: 17px 0 0; color: var(--ink-faint); font-size: 9px; }
+.billing-safety { display: grid; grid-template-columns: 38px minmax(0,1fr); align-content: start; gap: 12px; padding: 24px; }
+.billing-safety > svg { width: 22px; color: var(--green); }
+.billing-safety strong { font-size: 12px; }
+.billing-safety p { margin: 5px 0 0; color: var(--ink-soft); font-size: 10px; line-height: 1.55; }
+.pricing-heading { margin-top: 34px; }
+.pricing-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 14px; }
+.pricing-card { display: grid; grid-template-rows: auto auto 1fr auto; gap: 15px; padding: 23px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
+.pricing-card.is-current { border-color: var(--orange); box-shadow: inset 0 3px var(--orange); }
+.pricing-card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.pricing-card h3 { margin: 0; font-size: 17px; }
+.pricing-price { font-family: var(--font-display); font-size: 31px; }
+.pricing-price small { color: var(--ink-faint); font-family: var(--font-sans); font-size: 9px; }
+.pricing-features { display: grid; align-content: start; gap: 9px; margin: 0; padding: 0; list-style: none; }
+.pricing-features li { display: flex; align-items: center; gap: 8px; color: var(--ink-soft); font-size: 10px; }
+.pricing-features svg { width: 14px; color: var(--green); }
+.pricing-card button { width: 100%; }
+.billing-admin { margin-top: 36px; }
+.billing-table select { min-height: 36px; padding: 0 10px; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; }
+.billing-table td span { display: block; color: var(--ink-faint); font-size: 9px; }
+
 .access-dialog { width: min(470px, calc(100% - 28px)); padding: 0; color: var(--ink); background: var(--surface); border: 0; border-radius: 20px; box-shadow: 0 30px 100px rgba(0,0,0,.32); }
 .access-dialog::backdrop { background: rgba(20,17,14,.68); backdrop-filter: blur(8px); }
 .access-dialog form { padding: 34px; }
@@ -485,6 +518,8 @@ input[type="range"] { width: 100%; height: 5px; margin: 9px 0 3px; accent-color:
   .research-layout { grid-template-columns: 1fr; }
   .launch-rail { position: static; grid-template-columns: 1fr 1fr; }
   .runs-workspace { grid-template-columns: 1fr; }
+  .billing-summary { grid-template-columns: 1fr; }
+  .pricing-grid { grid-template-columns: 1fr; }
   .detail-panel { position: static; min-height: 0; }
   .detail-empty { min-height: 280px; }
 }
@@ -524,6 +559,8 @@ input[type="range"] { width: 100%; height: 5px; margin: 9px 0 3px; accent-color:
   .run-signals { display: none; }
   .result-metrics { grid-template-columns: 1fr 1fr; }
   .ai-shop-list { grid-template-columns: 1fr; }
+  .current-plan-name { align-items: flex-start; flex-direction: column; }
+  .billing-table { min-width: 700px; }
   .ai-concept-head, .ai-analysis-actions { align-items: stretch; flex-direction: column; }
   .ai-price, .ai-analysis-actions small { text-align: left; }
   .access-dialog form { padding: 26px 20px; }

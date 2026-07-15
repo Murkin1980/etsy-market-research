@@ -69,6 +69,15 @@ export const config = {
     maxRequestBodyBytes: envInt('MAX_REQUEST_BODY_BYTES', 16_384),
     sessionTtlDays: envInt('SESSION_TTL_DAYS', 7),
   },
+  paddle: {
+    apiKey: env('PADDLE_API_KEY'),
+    webhookSecret: env('PADDLE_WEBHOOK_SECRET'),
+    environment: env('PADDLE_ENVIRONMENT', 'sandbox') === 'production' ? 'production' as const : 'sandbox' as const,
+    prices: {
+      pro: env('PADDLE_PRICE_PRO'),
+      studio: env('PADDLE_PRICE_STUDIO'),
+    },
+  },
   logging: {
     level: env('LOG_LEVEL', 'info'),
   },
@@ -80,6 +89,7 @@ export const config = {
     checkpoints: path.resolve('data/checkpoints'),
     settings: path.resolve('data/settings'),
     auth: path.resolve('data/auth'),
+    billing: path.resolve('data/billing'),
     runs: path.resolve('data/runs'),
     logs: path.resolve('logs'),
   },
