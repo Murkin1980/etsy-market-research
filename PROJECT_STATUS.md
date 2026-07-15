@@ -162,6 +162,20 @@ browser console    PASS (0 errors, 0 warnings)
 
 Next product stage: replace the temporary shared production API key with user accounts and per-user workspaces before offering Signal Lab as a public commercial product.
 
+## Stage 11 — Accounts and personal workspaces
+
+Status: **Completed**
+
+- [x] Add invite-only registration and login with normalized emails and salted scrypt password hashes.
+- [x] Add persistent seven-day HttpOnly, SameSite=Strict sessions with rotation, revocation, and CSRF protection.
+- [x] Add administrator/member roles, one-time expiring invitations, and an emergency administrator API-key fallback.
+- [x] Persist run ownership and enforce workspace isolation for jobs, run lists, AI analysis, and report downloads.
+- [x] Keep legacy production runs visible only to administrators while assigning every new run to its creator.
+- [x] Replace the mobile Secret Manager prompt with account login, registration, profile, invitation, and logout workflows.
+- [x] Pass typecheck, lint, 102/102 tests, build, HTTP authentication smoke, desktop/mobile visual checks, and browser console verification.
+
+Next product stage: usage quotas, subscription plans, and payment-backed limits before opening self-service public registration.
+
 Official API flow:
 
 ```text

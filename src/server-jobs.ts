@@ -5,6 +5,7 @@ export type ResearchJobStatus = 'queued' | 'running' | 'completed' | 'failed';
 
 export interface ResearchJob {
   id: string;
+  ownerId: string;
   query: string;
   request: ResearchJobRequest;
   status: ResearchJobStatus;
@@ -48,7 +49,7 @@ export class JobManager {
     this.now = options.now ?? (() => new Date().toISOString());
   }
 
-  enqueue(request: ResearchJobRequest): { job: ResearchJob; queuePosition: number } {
+  enqueue(request: ResearchJobRequest, ownerId = 'local-admin'): { job: ResearchJob; queuePosition: number } {
     const allSlotsBusy = this.activeJobIds.size >= this.options.maxConcurrent;
     if (allSlotsBusy && this.queuedJobs.length >= this.options.maxQueued) {
       throw new JobQueueFullError(this.options.maxQueued);
@@ -58,6 +59,7 @@ export class JobManager {
     const queuePosition = Math.max(0, this.queuedJobs.length + 1 - availableSlots);
     const job: ResearchJob = {
       id: this.createId(),
+      ownerId,
       query: request.query,
       request,
       status: 'queued',
@@ -70,12 +72,12 @@ export class JobManager {
     return { job, queuePosition };
   }
 
-  get(jobId: string): ResearchJob | undefined {
-    return this.retainedJobs.find((job) => job.id === jobId);
+  get(jobId: string, ownerId?: string, includeAll = false): ResearchJob | undefined {
+    return this.retainedJobs.find((job) => job.id === jobId && (includeAll || !ownerId || job.ownerId === ownerId));
   }
 
-  list(): ResearchJob[] {
-    return [...this.retainedJobs];
+  list(ownerId?: string, includeAll = false): ResearchJob[] {
+    return this.retainedJobs.filter((job) => includeAll || !ownerId || job.ownerId === ownerId);
   }
 
   stats(): { active: number; queued: number; retained: number } {
