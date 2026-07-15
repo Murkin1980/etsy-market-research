@@ -162,7 +162,7 @@ export class EtsyApiClient {
         const response = await this.fetchImpl(`${this.baseUrl}${path}`, {
           headers: {
             Accept: 'application/json',
-            'User-Agent': 'etsy-market-research/1.6.0',
+            'User-Agent': 'etsy-market-research/1.6.1',
             'x-api-key': this.options.apiKey,
           },
           signal: AbortSignal.timeout(this.timeoutMs),
