@@ -129,6 +129,15 @@
     return node;
   }
 
+  function isSafeEtsyUrl(value) {
+    try {
+      const url = new URL(value);
+      return url.protocol === 'https:' && (url.hostname === 'etsy.com' || url.hostname.endsWith('.etsy.com'));
+    } catch {
+      return false;
+    }
+  }
+
   function setStatusBadge(node, status) {
     node.className = `status-badge status-${status || 'unknown'}`;
     node.textContent = statusLabel(status);
@@ -547,6 +556,34 @@
       }
       competitors.append(list);
       elements.aiAnalysisContent.append(competitors);
+    }
+
+    if (Array.isArray(payload.topShopLinks) && payload.topShopLinks.length > 0) {
+      const shops = createElement('section', 'ai-analysis-block');
+      shops.append(createElement('h4', '', 'Магазины сильных конкурентов'));
+      const note = createElement('p', 'ai-shop-note', 'Ссылки взяты из исходных объявлений. Продажи магазина — косвенный сигнал, а не продажи конкретной карточки.');
+      const list = createElement('div', 'ai-shop-list');
+      for (const shop of payload.topShopLinks) {
+        if (!isSafeEtsyUrl(shop.shopUrl) || !isSafeEtsyUrl(shop.listingUrl)) continue;
+        const item = createElement('article');
+        const shopLink = createElement('a', 'ai-shop-name', shop.shopName);
+        shopLink.href = shop.shopUrl;
+        shopLink.target = '_blank';
+        shopLink.rel = 'noopener noreferrer';
+        const listingLink = createElement('a', 'ai-shop-listing', 'Открыть карточку');
+        listingLink.href = shop.listingUrl;
+        listingLink.target = '_blank';
+        listingLink.rel = 'noopener noreferrer';
+        const signal = shop.shopSalesSignal === null
+          ? 'Сигнал продаж магазина недоступен'
+          : `${new Intl.NumberFormat('ru-RU').format(shop.shopSalesSignal)} продаж магазина`;
+        item.append(shopLink, createElement('p', '', shop.listingTitle), createElement('span', 'ai-shop-signal', signal), listingLink);
+        list.append(item);
+      }
+      if (list.childElementCount > 0) {
+        shops.append(note, list);
+        elements.aiAnalysisContent.append(shops);
+      }
     }
 
     appendStringList(elements.aiAnalysisContent, 'Риски и следующие проверки', analysis.risks, 'risks');

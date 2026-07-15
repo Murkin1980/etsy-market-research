@@ -92,7 +92,7 @@ The production server includes the **Signal Lab** web panel at `/`. It provides:
 - validated research-job creation with conservative defaults;
 - live queue/job status and clear blocked/failed states;
 - retained job and stored-run browsing;
-- on-demand AI analysis of an existing report with deterministic metrics, data-quality warnings, competitor evidence, product positioning, pricing, packaging, and validation risks;
+- on-demand AI analysis of an existing report with deterministic metrics, data-quality warnings, competitor evidence, verified Etsy shop/listing links, product positioning, pricing, packaging, and validation risks;
 - authenticated downloads for allowlisted JSON/CSV report files;
 - responsive desktop/mobile layouts with self-hosted Onest, Instrument Serif, and Lucide assets.
 
