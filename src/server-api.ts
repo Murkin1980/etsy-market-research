@@ -269,6 +269,13 @@ export function buildCliParams(jobId: string, request: ResearchJobRequest): stri
 }
 
 export function parseRunResultOutput(stdout: string): RunResultPayload | null {
+  try {
+    const document = RunResultSchema.safeParse(JSON.parse(stdout.trim()));
+    if (document.success) return document.data;
+  } catch {
+    // Fall back to CLI output where the final JSON object is written on one line.
+  }
+
   const lines = stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).reverse();
   for (const line of lines) {
     try {
