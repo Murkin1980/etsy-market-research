@@ -47,7 +47,7 @@ const rateLimitMap = new Map<string, number[]>();
 const RATE_WINDOW_MS = 60_000;
 const MAX_CHILD_OUTPUT_BYTES = 1_000_000;
 const MIN_PRODUCTION_API_KEY_LENGTH = 24;
-const APP_VERSION = '1.6.1';
+const APP_VERSION = '1.6.2';
 const activeChildren = new Set<ReturnType<typeof spawn>>();
 const activeAiAnalyses = new Set<string>();
 let rateLimitChecks = 0;
@@ -63,8 +63,7 @@ const accountStore = new AccountStore(
 const runOwnershipStore = new RunOwnershipStore(path.join(config.paths.auth, 'run-owners.json'));
 const billingStore = new BillingStore(path.join(config.paths.billing, 'billing.json'));
 
-function checkRateLimit(ip: string): boolean {
-  const limit = config.server.rateLimitPerMinute;
+function checkRateLimit(ip: string, limit: number): boolean {
   if (limit <= 0) return true;
 
   const now = Date.now();
@@ -327,10 +326,13 @@ const server = http.createServer(async (req, res) => {
   }
 
   const ip = getClientIp(req, config.server.trustProxy);
-  if (!checkRateLimit(ip)) {
+  const rateLimit = req.method === 'GET'
+    ? config.server.rateLimitPerMinute * 10
+    : config.server.rateLimitPerMinute;
+  if (!checkRateLimit(ip, rateLimit)) {
     sendJson(res, 429, {
       error: 'Rate limit exceeded',
-      limit: config.server.rateLimitPerMinute,
+      limit: rateLimit,
       window: '60s',
     });
     return;

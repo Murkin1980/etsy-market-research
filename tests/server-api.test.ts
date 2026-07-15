@@ -115,6 +115,28 @@ describe('server API helpers', () => {
     expect(result?.runDir).toBe('data/runs/job-123');
   });
 
+  it('reads a pretty-printed run result stored as a JSON document', () => {
+    const result = parseRunResultOutput(JSON.stringify({
+      status: 'completed',
+      query: 'notion template',
+      runDir: 'data/runs/notion-template',
+      totalFound: 100,
+      successCount: 100,
+      partialCount: 0,
+      failedCount: 0,
+      blockedCount: 0,
+      averagePriceUsd: 29.5,
+      medianPriceUsd: 25,
+      durationMs: 36_000,
+    }, null, 2));
+
+    expect(result).toMatchObject({
+      status: 'completed',
+      query: 'notion template',
+      totalFound: 100,
+    });
+  });
+
   it('compares API keys without accepting different lengths or contents', () => {
     expect(secretsEqual('correct-key', 'correct-key')).toBe(true);
     expect(secretsEqual('wrong-key', 'correct-key')).toBe(false);
