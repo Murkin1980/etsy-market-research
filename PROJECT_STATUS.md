@@ -176,6 +176,21 @@ Status: **Completed**
 
 Next product stage: usage quotas, subscription plans, and payment-backed limits before opening self-service public registration.
 
+## Stage 12 — Plans, quotas, and payment foundation
+
+Status: **Completed; Paddle seller activation pending**
+
+- [x] Add Trial, Pro, and Studio plan definitions with explicit monthly research, AI-analysis, and per-run listing limits.
+- [x] Enforce quotas server-side before queuing paid work, refund failed queue reservations, and keep the emergency owner key unlimited.
+- [x] Persist subscriptions, calendar-month usage, Paddle identifiers, and processed webhook event IDs atomically with mode `0600`.
+- [x] Add hosted Paddle checkout creation without exposing the secret API key or handling payment-card data in Signal Lab.
+- [x] Verify Paddle webhooks over the exact raw body with HMAC-SHA256, replay tolerance, price mapping, and idempotent lifecycle updates.
+- [x] Add a responsive Russian-language tariff screen with usage bars, plan comparison, safe unavailable-payment state, and administrator plan controls.
+- [x] Pass typecheck, lint, 107/107 tests, build, end-to-end quota/account smoke, desktop/mobile visual checks, and a zero-error browser console check.
+- [ ] Create and verify the Paddle seller account, products, recurring prices, default payment link, and production webhook destination; then add the five Paddle values to Google Secret Manager.
+
+Next product stage: public onboarding, email verification, password recovery, and transactional notifications.
+
 Official API flow:
 
 ```text

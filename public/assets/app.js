@@ -6,6 +6,7 @@
     overview: ['Рабочее пространство', 'Обзор исследований'],
     research: ['Новый запуск', 'Создать исследование'],
     runs: ['Архив данных', 'Запуски и отчёты'],
+    billing: ['Аккаунт и доступ', 'Тариф и лимиты'],
   };
 
   const state = {
@@ -23,6 +24,8 @@
     pollTimer: null,
     currentView: 'overview',
     etsyApiStatus: 'missing',
+    billing: null,
+    billingAccounts: [],
   };
 
   const $ = (id) => document.getElementById(id);
@@ -136,6 +139,19 @@
     analyzeReportButton: $('analyzeReportButton'),
     runFiles: $('runFiles'),
     filesEmpty: $('filesEmpty'),
+    billingStatusBadge: $('billingStatusBadge'),
+    currentPlanName: $('currentPlanName'),
+    currentPlanPrice: $('currentPlanPrice'),
+    researchUsageText: $('researchUsageText'),
+    researchUsageBar: $('researchUsageBar'),
+    aiUsageText: $('aiUsageText'),
+    aiUsageBar: $('aiUsageBar'),
+    billingPeriod: $('billingPeriod'),
+    quotaList: $('quotaList'),
+    checkoutReadiness: $('checkoutReadiness'),
+    pricingGrid: $('pricingGrid'),
+    billingAdmin: $('billingAdmin'),
+    billingAccountsBody: $('billingAccountsBody'),
     toastRegion: $('toastRegion'),
   };
 
@@ -272,7 +288,8 @@
     elements.pageEyebrow.textContent = viewMeta[viewName][0];
     elements.pageTitle.textContent = viewMeta[viewName][1];
     window.scrollTo({ top: 0, behavior: 'smooth' });
-    if (viewName === 'runs' && hasAccess()) void refreshProtectedData();
+    if ((viewName === 'runs' || viewName === 'billing') && hasAccess()) void refreshProtectedData();
+    if (viewName === 'billing' && !hasAccess()) openAccessDialog('Войдите, чтобы увидеть тариф и лимиты.');
   }
 
   function updateConnectionUi(online, message) {
@@ -287,7 +304,8 @@
   }
 
   function canLaunchResearch() {
-    return Boolean(state.health) && (
+    const quotaAvailable = !state.billing || state.billing.unlimited || state.billing.remaining?.research > 0;
+    return Boolean(state.health) && quotaAvailable && (
       state.health.dataSource !== 'etsy-api' || state.etsyApiStatus === 'verified'
     );
   }
@@ -371,13 +389,21 @@
       return;
     }
     try {
-      const [jobsPayload, runsPayload] = await Promise.all([api('/jobs'), api('/runs')]);
+      const [jobsPayload, runsPayload, billingPayload, accountsPayload] = await Promise.all([
+        api('/jobs'),
+        api('/runs'),
+        api('/billing/status'),
+        isAdmin() ? api('/admin/accounts') : Promise.resolve({ accounts: [] }),
+      ]);
       state.jobs = Array.isArray(jobsPayload.jobs) ? jobsPayload.jobs : [];
       state.runs = Array.isArray(runsPayload.runs) ? runsPayload.runs : [];
+      state.billing = billingPayload;
+      state.billingAccounts = Array.isArray(accountsPayload.accounts) ? accountsPayload.accounts : [];
       elements.jobsCount.textContent = String(state.jobs.length);
       elements.runsCount.textContent = String(state.runs.length);
       renderOverviewJobs();
       renderRunsList();
+      renderBilling();
 
       const active = [...state.jobs].reverse().find((job) => job.status === 'running' || job.status === 'queued');
       if (active && !state.currentJobId) {
@@ -393,6 +419,147 @@
         showToast('Не удалось обновить данные', error.message, 'error');
       }
     }
+  }
+
+  function usagePercent(used, limit) {
+    if (!Number.isFinite(limit) || limit <= 0) return 0;
+    return Math.min(100, Math.round((used / limit) * 100));
+  }
+
+  function billingStatusLabel(status) {
+    return ({ trialing: 'Пробный', active: 'Активен', past_due: 'Нужна оплата', canceled: 'Завершён' })[status] || 'Активен';
+  }
+
+  function renderBilling() {
+    const billing = state.billing;
+    if (!billing) return;
+    const plan = billing.plan;
+    const unlimited = Boolean(billing.unlimited);
+    elements.currentPlanName.textContent = plan.name;
+    elements.currentPlanPrice.textContent = unlimited || plan.monthlyPriceUsd === 0 ? 'Без оплаты' : `$${plan.monthlyPriceUsd} / месяц`;
+    elements.billingStatusBadge.textContent = unlimited ? 'Без лимита' : billingStatusLabel(billing.subscription?.status);
+    elements.checkoutReadiness.textContent = billing.checkoutConfigured ? 'Paddle подключён' : 'Ожидает настройки Paddle';
+    elements.checkoutReadiness.classList.toggle('is-warning', !billing.checkoutConfigured);
+    elements.quotaList.hidden = unlimited;
+    if (!unlimited) {
+      const researchLimit = plan.limits.research;
+      const aiLimit = plan.limits.aiAnalysis;
+      elements.researchUsageText.textContent = `${billing.usage.research} из ${researchLimit}`;
+      elements.aiUsageText.textContent = `${billing.usage.aiAnalysis} из ${aiLimit}`;
+      elements.researchUsageBar.style.width = `${usagePercent(billing.usage.research, researchLimit)}%`;
+      elements.aiUsageBar.style.width = `${usagePercent(billing.usage.aiAnalysis, aiLimit)}%`;
+      elements.billingPeriod.textContent = `Период ${billing.usage.period} · осталось исследований: ${billing.remaining.research}, AI-анализов: ${billing.remaining.aiAnalysis}`;
+      elements.listingsInput.max = String(plan.limits.maxListings);
+      if (Number(elements.listingsInput.value) > plan.limits.maxListings) elements.listingsInput.value = String(plan.limits.maxListings);
+    } else {
+      elements.billingPeriod.textContent = 'Служебный доступ владельца не расходует пользовательские квоты.';
+      elements.listingsInput.max = '500';
+    }
+    updateResearchSummary();
+    elements.submitResearchButton.disabled = !canLaunchResearch();
+    renderPricingPlans(billing.plans || []);
+    renderBillingAccounts();
+  }
+
+  function renderPricingPlans(plans) {
+    elements.pricingGrid.replaceChildren();
+    for (const plan of plans) {
+      const card = createElement('article', `pricing-card${state.billing?.plan?.id === plan.id ? ' is-current' : ''}`);
+      const head = createElement('div', 'pricing-card-head');
+      head.append(createElement('h3', '', plan.name));
+      if (state.billing?.plan?.id === plan.id) head.append(createElement('span', 'mini-badge', 'Текущий'));
+      const price = createElement('div', 'pricing-price');
+      price.textContent = plan.monthlyPriceUsd === 0 ? '$0' : `$${plan.monthlyPriceUsd}`;
+      price.append(createElement('small', '', ' / месяц'));
+      const features = createElement('ul', 'pricing-features');
+      [
+        `${plan.limits.research} исследований в месяц`,
+        `${plan.limits.aiAnalysis} AI-анализов в месяц`,
+        `до ${plan.limits.maxListings} листингов за запуск`,
+      ].forEach((label) => {
+        const item = createElement('li');
+        const icon = createElement('i');
+        icon.dataset.lucide = 'check';
+        item.append(icon, document.createTextNode(label));
+        features.append(item);
+      });
+      const button = createElement('button', plan.id === 'trial' ? 'secondary-button' : 'primary-button');
+      button.type = 'button';
+      const isCurrent = state.billing?.plan?.id === plan.id;
+      button.disabled = isCurrent || plan.id === 'trial' || !state.billing?.checkoutConfigured || state.billing?.unlimited;
+      button.textContent = isCurrent ? 'Текущий тариф' : plan.id === 'trial' ? 'Включён при регистрации' : state.billing?.checkoutConfigured ? `Выбрать ${plan.name}` : 'Скоро доступно';
+      if (!button.disabled) button.addEventListener('click', () => void startCheckout(plan.id, button));
+      card.append(head, price, features, button);
+      elements.pricingGrid.append(card);
+    }
+    refreshIcons();
+  }
+
+  function renderBillingAccounts() {
+    elements.billingAdmin.hidden = !isAdmin();
+    elements.billingAccountsBody.replaceChildren();
+    if (!isAdmin()) return;
+    for (const account of state.billingAccounts) {
+      const row = document.createElement('tr');
+      const userCell = document.createElement('td');
+      userCell.append(createElement('strong', '', account.name), createElement('span', '', account.email));
+      const roleCell = createElement('td', '', account.role === 'admin' ? 'Администратор' : 'Участник');
+      const planCell = document.createElement('td');
+      const select = document.createElement('select');
+      select.setAttribute('aria-label', `Тариф ${account.name}`);
+      for (const plan of state.billing.plans || []) {
+        const option = document.createElement('option');
+        option.value = plan.id;
+        option.textContent = plan.name;
+        option.selected = plan.id === account.billing.plan.id;
+        select.append(option);
+      }
+      select.addEventListener('change', () => void updateAccountPlan(account.id, select.value, select));
+      planCell.append(select);
+      const usageCell = createElement('td', '', `${account.billing.usage.research} исследований · ${account.billing.usage.aiAnalysis} AI`);
+      row.append(userCell, roleCell, planCell, usageCell);
+      elements.billingAccountsBody.append(row);
+    }
+  }
+
+  async function startCheckout(planId, button) {
+    button.disabled = true;
+    try {
+      const payload = await api('/billing/checkout', { method: 'POST', body: JSON.stringify({ planId }) });
+      const checkoutUrl = new URL(payload.checkoutUrl);
+      if (checkoutUrl.protocol !== 'https:' || (checkoutUrl.hostname !== 'paddle.com' && !checkoutUrl.hostname.endsWith('.paddle.com'))) throw new Error('Некорректная ссылка оплаты');
+      window.location.assign(checkoutUrl.toString());
+    } catch (error) {
+      showToast('Не удалось открыть оплату', error.message, 'error');
+      button.disabled = false;
+    }
+  }
+
+  async function updateAccountPlan(accountId, planId, select) {
+    select.disabled = true;
+    try {
+      await api(`/admin/accounts/${encodeURIComponent(accountId)}/plan`, { method: 'PUT', body: JSON.stringify({ planId }) });
+      showToast('Тариф обновлён', 'Новые лимиты применены сразу.');
+      await refreshProtectedData();
+    } catch (error) {
+      showToast('Не удалось обновить тариф', error.message, 'error');
+      await refreshProtectedData();
+    } finally {
+      select.disabled = false;
+    }
+  }
+
+  function handleQuotaError(error) {
+    if (!(error instanceof ApiError) || error.status !== 402) return false;
+    const isListingLimit = error.payload?.quota === 'maxListings';
+    showToast(
+      'Лимит тарифа',
+      isListingLimit ? `Этот тариф поддерживает до ${error.payload.limit} листингов за запуск.` : 'Месячный лимит исчерпан. Откройте тарифы, чтобы увеличить объём.',
+      'error',
+    );
+    showView('billing');
+    void refreshProtectedData();
+    return true;
   }
 
   async function refreshAll() {
@@ -665,7 +832,7 @@
       showToast('AI-анализ готов', 'Рекомендации сохранены вместе с файлами отчёта.');
     } catch (error) {
       setAiAnalysisState('error', error.message);
-      showToast('Не удалось выполнить AI-анализ', error.message, 'error');
+      if (!handleQuotaError(error)) showToast('Не удалось выполнить AI-анализ', error.message, 'error');
     }
   }
 
@@ -818,7 +985,7 @@
       showToast('Исследование принято', created.queuePosition ? `Позиция в очереди: ${created.queuePosition}` : 'Запуск начался.');
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) openAccessDialog('Сессия завершена. Войдите снова.');
-      else showToast('Не удалось запустить исследование', error.message, 'error');
+      else if (!handleQuotaError(error)) showToast('Не удалось запустить исследование', error.message, 'error');
     } finally {
       elements.submitResearchButton.disabled = !canLaunchResearch();
     }

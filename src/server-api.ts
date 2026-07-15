@@ -55,9 +55,19 @@ export const InviteRequestSchema = z.object({
   role: z.enum(['admin', 'member']).default('member'),
 }).strict();
 
+export const PlanChangeRequestSchema = z.object({
+  planId: z.enum(['trial', 'pro', 'studio']),
+}).strict();
+
+export const CheckoutRequestSchema = z.object({
+  planId: z.enum(['pro', 'studio']),
+}).strict();
+
 export type LoginRequest = z.infer<typeof LoginRequestSchema>;
 export type RegisterRequest = z.infer<typeof RegisterRequestSchema>;
 export type InviteRequest = z.infer<typeof InviteRequestSchema>;
+export type PlanChangeRequest = z.infer<typeof PlanChangeRequestSchema>;
+export type CheckoutRequest = z.infer<typeof CheckoutRequestSchema>;
 
 export interface RunResultPayload {
   status: 'completed' | 'failed';
@@ -140,6 +150,46 @@ export function parseInviteRequest(input: unknown): InviteRequest {
   const parsed = InviteRequestSchema.safeParse(input);
   if (!parsed.success) throw new RequestBodyError('Invalid invitation request', 400, parsed.error.flatten());
   return parsed.data;
+}
+
+export function parsePlanChangeRequest(input: unknown): PlanChangeRequest {
+  const parsed = PlanChangeRequestSchema.safeParse(input);
+  if (!parsed.success) throw new RequestBodyError('Invalid plan change request', 400, parsed.error.flatten());
+  return parsed.data;
+}
+
+export function parseCheckoutRequest(input: unknown): CheckoutRequest {
+  const parsed = CheckoutRequestSchema.safeParse(input);
+  if (!parsed.success) throw new RequestBodyError('Invalid checkout request', 400, parsed.error.flatten());
+  return parsed.data;
+}
+
+export function readRawBody(req: http.IncomingMessage, maxBytes: number): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let receivedBytes = 0;
+    let settled = false;
+    const fail = (error: Error): void => {
+      if (settled) return;
+      settled = true;
+      reject(error);
+    };
+    req.on('data', (chunk: Buffer) => {
+      if (settled) return;
+      receivedBytes += chunk.length;
+      if (receivedBytes > maxBytes) {
+        fail(new RequestBodyError(`Request body exceeds ${maxBytes} bytes`, 413));
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on('end', () => {
+      if (settled) return;
+      settled = true;
+      resolve(Buffer.concat(chunks).toString('utf-8'));
+    });
+    req.on('error', fail);
+  });
 }
 
 export function parseJsonBody(

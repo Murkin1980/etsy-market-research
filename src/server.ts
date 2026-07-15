@@ -6,14 +6,17 @@ import { config } from './config/env.js';
 import {
   buildCliParams,
   getClientIp,
+  parseCheckoutRequest,
   parseJsonBody,
   parseAiAnalysisRequest,
   parseEtsyApiSettings,
   parseInviteRequest,
+  parsePlanChangeRequest,
   parseResearchJobRequest,
   parseLoginRequest,
   parseRegisterRequest,
   parseRunResultOutput,
+  readRawBody,
   RequestBodyError,
   type RunResultPayload,
 } from './server-api.js';
@@ -35,6 +38,8 @@ import {
 import { AccountStore } from './auth/account-store.js';
 import { authenticateRequest, clearSessionCookie, sessionCookie, type RequestPrincipal } from './auth/http-auth.js';
 import { RunOwnershipStore } from './storage/run-ownership.js';
+import { BillingStore, PLAN_CATALOG, QuotaExceededError } from './billing/billing-store.js';
+import { createPaddleCheckout, paddleConfigured, parsePaddleSubscriptionEvent, verifyPaddleWebhook } from './billing/paddle.js';
 
 const log = createChildLogger('server');
 
@@ -42,7 +47,7 @@ const rateLimitMap = new Map<string, number[]>();
 const RATE_WINDOW_MS = 60_000;
 const MAX_CHILD_OUTPUT_BYTES = 1_000_000;
 const MIN_PRODUCTION_API_KEY_LENGTH = 24;
-const APP_VERSION = '1.5.0';
+const APP_VERSION = '1.6.0';
 const activeChildren = new Set<ReturnType<typeof spawn>>();
 const activeAiAnalyses = new Set<string>();
 let rateLimitChecks = 0;
@@ -56,6 +61,7 @@ const accountStore = new AccountStore(
   config.server.sessionTtlDays,
 );
 const runOwnershipStore = new RunOwnershipStore(path.join(config.paths.auth, 'run-owners.json'));
+const billingStore = new BillingStore(path.join(config.paths.billing, 'billing.json'));
 
 function checkRateLimit(ip: string): boolean {
   const limit = config.server.rateLimitPerMinute;
@@ -295,7 +301,28 @@ const server = http.createServer(async (req, res) => {
       aiAnalysisConfigured: Boolean(config.openaiApiKey),
       aiAnalysisModel: config.openaiModel,
       authentication: 'accounts-and-admin-key',
+      billing: paddleConfigured(config.paddle) ? 'paddle' : 'trial-only',
     });
+    return;
+  }
+
+  if (url.pathname === '/webhooks/paddle' && req.method === 'POST') {
+    try {
+      const rawBody = await readRawBody(req, Math.max(config.server.maxRequestBodyBytes, 262_144));
+      const signature = Array.isArray(req.headers['paddle-signature'])
+        ? req.headers['paddle-signature'][0]
+        : req.headers['paddle-signature'] ?? '';
+      if (!verifyPaddleWebhook(rawBody, signature, config.paddle.webhookSecret)) {
+        sendJson(res, 401, { error: 'Invalid Paddle signature' });
+        return;
+      }
+      const event = parsePaddleSubscriptionEvent(JSON.parse(rawBody), config.paddle.prices);
+      if (event && accountStore.hasAccount(event.accountId)) billingStore.applyPaddleSubscription(event);
+      sendJson(res, 200, { received: true });
+    } catch (error) {
+      if (error instanceof RequestBodyError) sendJson(res, error.statusCode, { error: error.message });
+      else sendJson(res, 400, { error: 'Invalid Paddle webhook' });
+    }
     return;
   }
 
@@ -392,6 +419,44 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (url.pathname === '/billing/status' && req.method === 'GET') {
+    if (principal.authType !== 'session') {
+      sendJson(res, 200, {
+        unlimited: true,
+        plan: { id: 'internal', name: 'Владелец', monthlyPriceUsd: 0, limits: null },
+        checkoutConfigured: paddleConfigured(config.paddle),
+        plans: Object.values(PLAN_CATALOG),
+      });
+      return;
+    }
+    sendJson(res, 200, {
+      unlimited: false,
+      ...billingStore.status(principal.userId),
+      checkoutConfigured: paddleConfigured(config.paddle),
+      plans: Object.values(PLAN_CATALOG),
+    });
+    return;
+  }
+
+  if (url.pathname === '/billing/checkout' && req.method === 'POST') {
+    if (!principal.account) {
+      sendJson(res, 400, { error: 'Checkout requires an account session' });
+      return;
+    }
+    try {
+      const input = parseCheckoutRequest(await parseJsonBody(req, config.server.maxRequestBodyBytes));
+      const checkoutUrl = await createPaddleCheckout(config.paddle, {
+        accountId: principal.account.id,
+        planId: input.planId,
+      });
+      sendJson(res, 201, { checkoutUrl });
+    } catch (error) {
+      if (error instanceof RequestBodyError) sendJson(res, error.statusCode, { error: error.message, details: error.details });
+      else sendJson(res, 503, { error: (error as Error).message });
+    }
+    return;
+  }
+
   if (url.pathname === '/admin/invites' && req.method === 'POST') {
     if (principal.role !== 'admin') {
       sendJson(res, 403, { error: 'Administrator access is required' });
@@ -404,6 +469,37 @@ const server = http.createServer(async (req, res) => {
     } catch (error) {
       if (error instanceof RequestBodyError) sendJson(res, error.statusCode, { error: error.message, details: error.details });
       else sendJson(res, 500, { error: 'Failed to create invitation' });
+    }
+    return;
+  }
+
+  if (url.pathname === '/admin/accounts' && req.method === 'GET') {
+    if (principal.role !== 'admin') {
+      sendJson(res, 403, { error: 'Administrator access is required' });
+      return;
+    }
+    const accounts = accountStore.listAccounts().map((account) => ({ ...account, billing: billingStore.status(account.id) }));
+    sendJson(res, 200, { accounts, total: accounts.length });
+    return;
+  }
+
+  const adminPlanMatch = url.pathname.match(/^\/admin\/accounts\/([^/]+)\/plan$/);
+  if (adminPlanMatch && req.method === 'PUT') {
+    if (principal.role !== 'admin') {
+      sendJson(res, 403, { error: 'Administrator access is required' });
+      return;
+    }
+    const accountId = decodePathSegment(adminPlanMatch[1]);
+    if (!accountId || !accountStore.hasAccount(accountId)) {
+      sendJson(res, 404, { error: 'Account not found' });
+      return;
+    }
+    try {
+      const input = parsePlanChangeRequest(await parseJsonBody(req, config.server.maxRequestBodyBytes));
+      sendJson(res, 200, billingStore.setPlan(accountId, input.planId));
+    } catch (error) {
+      if (error instanceof RequestBodyError) sendJson(res, error.statusCode, { error: error.message, details: error.details });
+      else sendJson(res, 500, { error: 'Failed to update plan' });
     }
     return;
   }
@@ -456,6 +552,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (url.pathname === '/jobs' && req.method === 'POST') {
+    let quotaConsumed = false;
     try {
       const body = await parseJsonBody(req, config.server.maxRequestBodyBytes);
       const request = parseResearchJobRequest(body);
@@ -468,6 +565,11 @@ const server = http.createServer(async (req, res) => {
         });
         return;
       }
+      if (principal.authType === 'session') {
+        billingStore.assertResearchAllowed(principal.userId, request.maxListings);
+        billingStore.consume(principal.userId, 'research');
+        quotaConsumed = true;
+      }
       const { job, queuePosition } = jobManager.enqueue(request, principal.userId);
       log.info({ jobId: job.id, query: job.query }, 'Job queued');
 
@@ -477,8 +579,11 @@ const server = http.createServer(async (req, res) => {
         ...(queuePosition > 0 ? { queuePosition } : {}),
       });
     } catch (error) {
+      if (quotaConsumed) billingStore.refund(principal.userId, 'research');
       if (error instanceof JobQueueFullError) {
         sendJson(res, 429, { error: 'Job queue is full', maxQueued: error.maxQueued });
+      } else if (error instanceof QuotaExceededError) {
+        sendJson(res, 402, { error: error.message, quota: error.kind, limit: error.limit });
       } else if (error instanceof RequestBodyError) {
         sendJson(res, error.statusCode, { error: error.message, details: error.details });
       } else {
@@ -543,6 +648,10 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 409, { error: 'AI analysis is already running for this report' });
         return;
       }
+      const existingAnalysis = getRunAiAnalysis(config.paths.runs, runId, Boolean(config.openaiApiKey), config.openaiModel);
+      if (principal.authType === 'session' && (request.force || existingAnalysis.status !== 'ready')) {
+        billingStore.consume(principal.userId, 'aiAnalysis');
+      }
       activeAiAnalyses.add(runId);
       try {
         const payload = await createRunAiAnalysis({
@@ -558,7 +667,9 @@ const server = http.createServer(async (req, res) => {
         activeAiAnalyses.delete(runId);
       }
     } catch (error) {
-      if (error instanceof RequestBodyError) {
+      if (error instanceof QuotaExceededError) {
+        sendJson(res, 402, { error: error.message, quota: error.kind, limit: error.limit });
+      } else if (error instanceof RequestBodyError) {
         sendJson(res, error.statusCode, { error: error.message, details: error.details });
       } else if (error instanceof RunReportError) {
         sendJson(res, error.statusCode, { error: error.message });
@@ -630,6 +741,9 @@ server.listen(port, config.server.host, () => {
   console.log('  POST /auth/register    - Create an invited account');
   console.log('  GET  /auth/me          - Read the current session');
   console.log('  POST /admin/invites    - Create a one-time invitation (admin)');
+  console.log('  GET  /billing/status   - Read plan limits and monthly usage');
+  console.log('  POST /billing/checkout - Start Paddle hosted checkout');
+  console.log('  POST /webhooks/paddle  - Receive verified subscription events');
   console.log('  GET  /jobs             - List jobs');
   console.log('  POST /jobs             - Create a validated research job');
   console.log('  GET  /jobs/:id         - Job status');

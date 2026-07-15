@@ -30,6 +30,9 @@
         <button class="nav-item" type="button" data-view-target="runs">
           <i data-lucide="folder-kanban" aria-hidden="true"></i><span>Запуски и отчёты</span>
         </button>
+        <button class="nav-item" type="button" data-view-target="billing">
+          <i data-lucide="chart-no-axes-column-increasing" aria-hidden="true"></i><span>Тариф и лимиты</span>
+        </button>
       </nav>
 
       <div class="sidebar-foot">
@@ -42,7 +45,7 @@
             <i data-lucide="circle-user-round" aria-hidden="true"></i><span id="accountButtonText">Войти</span>
           </button>
         </div>
-        <p class="version-label">Production · v1.5.0</p>
+        <p class="version-label">Production · v1.6.0</p>
       </div>
     </aside>
 
@@ -260,6 +263,29 @@
             </div>
           </aside>
         </div>
+      </section>
+
+      <section class="view" id="view-billing" data-view="billing" hidden>
+        <div class="billing-summary">
+          <section class="current-plan-panel" aria-labelledby="currentPlanTitle">
+            <div class="section-heading"><div><p class="eyebrow">Текущий доступ</p><h2 id="currentPlanTitle">Ваш тариф</h2></div><span class="status-badge" id="billingStatusBadge">—</span></div>
+            <div class="current-plan-name"><strong id="currentPlanName">—</strong><span id="currentPlanPrice">—</span></div>
+            <div class="quota-list" id="quotaList">
+              <div><div><strong>Исследования</strong><span id="researchUsageText">—</span></div><span class="quota-track"><i id="researchUsageBar"></i></span></div>
+              <div><div><strong>AI-анализы</strong><span id="aiUsageText">—</span></div><span class="quota-track"><i id="aiUsageBar"></i></span></div>
+            </div>
+            <p class="billing-period" id="billingPeriod">Лимиты обновляются ежемесячно.</p>
+          </section>
+          <aside class="billing-safety"><i data-lucide="shield-check" aria-hidden="true"></i><div><strong>Безопасная оплата</strong><p>Checkout открывается на стороне Paddle. Signal Lab не получает и не хранит данные банковской карты.</p></div></aside>
+        </div>
+
+        <div class="section-heading pricing-heading"><div><p class="eyebrow">Масштабирование</p><h2>Выберите подходящий объём</h2></div><span id="checkoutReadiness" class="mini-badge">Проверяем оплату</span></div>
+        <div class="pricing-grid" id="pricingGrid" aria-label="Тарифные планы"></div>
+
+        <section class="billing-admin" id="billingAdmin" hidden aria-labelledby="billingAdminTitle">
+          <div class="section-heading"><div><p class="eyebrow">Администрирование</p><h2 id="billingAdminTitle">Аккаунты и тарифы</h2></div></div>
+          <div class="table-wrap"><table class="billing-table"><thead><tr><th>Пользователь</th><th>Роль</th><th>Тариф</th><th>Использование</th></tr></thead><tbody id="billingAccountsBody"></tbody></table></div>
+        </section>
       </section>
     </main>
   </div>

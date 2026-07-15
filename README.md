@@ -89,6 +89,9 @@ The production server includes the **Signal Lab** web panel at `/`. It provides:
 
 - invite-only accounts with scrypt password hashing, persistent HttpOnly/SameSite sessions, CSRF protection, and admin/member roles;
 - personal workspaces that isolate retained jobs, runs, AI analyses, and report downloads by server-enforced ownership;
+- Trial, Pro, and Studio plans with server-enforced monthly research/AI quotas and per-run listing limits;
+- a responsive plan-and-usage screen plus administrator account/plan management;
+- Paddle hosted checkout and signed, replay-resistant subscription webhooks; payment-card data never enters Signal Lab;
 - emergency administrator API-key access stored only in the current browser tab;
 - Etsy Open API credential setup with live verification and encrypted persistent storage;
 - validated research-job creation with conservative defaults;
@@ -124,6 +127,11 @@ curl -X POST http://127.0.0.1:3000/jobs \
 | `GET /auth/me` | cookie/key | Restore the current session and rotate its CSRF token |
 | `POST /auth/logout` | session | Revoke the current session |
 | `POST /admin/invites` | admin | Create a one-time member/admin invitation |
+| `GET /admin/accounts` | admin | List accounts with plan and usage state |
+| `PUT /admin/accounts/:id/plan` | admin | Apply a manual plan override |
+| `GET /billing/status` | cookie/key | Read plans, current subscription, usage, and remaining quota |
+| `POST /billing/checkout` | session | Create a Paddle hosted checkout for Pro or Studio |
+| `POST /webhooks/paddle` | Paddle signature | Apply idempotent subscription lifecycle events |
 | `GET /jobs` | bearer | Retained jobs |
 | `POST /jobs` | bearer | Validate and queue research |
 | `GET /jobs/:id` | bearer | Job state and structured result |
@@ -135,12 +143,14 @@ curl -X POST http://127.0.0.1:3000/jobs \
 | `GET /runs/:id/ai-analysis` | bearer | Read a saved AI market analysis or its readiness state |
 | `POST /runs/:id/ai-analysis` | bearer | Generate or refresh an AI analysis from a completed report |
 
-The API validates body size and fields, limits requests by client IP, caps the job queue, bounds child-process output, and shuts down active workers on `SIGTERM`/`SIGINT`. Account and ownership records are atomically persisted under the existing `data/` volume with mode `0600`; passwords use salted scrypt hashes and raw session/invitation tokens are never stored. Existing unowned production reports are visible only to administrators. Etsy credentials saved through Signal Lab are verified before persistence, encrypted with AES-256-GCM using a key derived from the production `API_KEY`, and never returned to the browser. Rotating `API_KEY` requires entering the Etsy credential again. Configure `TRUST_PROXY=true` only behind a trusted proxy that replaces `X-Forwarded-For`.
+The API validates body size and fields, limits requests by client IP, caps the job queue, bounds child-process output, and shuts down active workers on `SIGTERM`/`SIGINT`. Account, ownership, subscription, usage, and processed-webhook records are atomically persisted under the existing `data/` volume with mode `0600`; passwords use salted scrypt hashes and raw session/invitation tokens are never stored. Quotas are checked before paid work is queued, and failed queue admission refunds the reservation. Paddle webhooks are verified against the exact raw body with HMAC-SHA256, a five-second timestamp tolerance, and event-id deduplication. Existing unowned production reports are visible only to administrators. Etsy credentials saved through Signal Lab are verified before persistence, encrypted with AES-256-GCM using a key derived from the production `API_KEY`, and never returned to the browser. Rotating `API_KEY` requires entering the Etsy credential again. Configure `TRUST_PROXY=true` only behind a trusted proxy that replaces `X-Forwarded-For`.
+
+Paddle remains disabled until the seller account, products, prices, default payment link, and webhook destination are created. Configure `PADDLE_ENVIRONMENT`, `PADDLE_API_KEY`, `PADDLE_WEBHOOK_SECRET`, `PADDLE_PRICE_PRO`, and `PADDLE_PRICE_STUDIO` in Secret Manager. The webhook destination is `https://34-18-107-101.sslip.io/webhooks/paddle`.
 
 ## Quality gates
 
 ```bash
-npm run check       # typecheck + lint + 102 tests + build
+npm run check       # typecheck + lint + 107 tests + build
 npm run smoke:api   # health, auth, and validation smoke test
 npm run smoke:ai    # one safe live structured-output request (uses API credits)
 npm audit --audit-level=high

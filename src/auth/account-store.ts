@@ -109,6 +109,14 @@ export class AccountStore {
     return { code, expiresAt };
   }
 
+  listAccounts(): PublicAccount[] {
+    return this.database.accounts.filter((account) => !account.disabled).map(publicAccount);
+  }
+
+  hasAccount(accountId: string): boolean {
+    return this.database.accounts.some((account) => account.id === accountId && !account.disabled);
+  }
+
   async register(input: { email: string; name: string; password: string; inviteCode: string }): Promise<PublicAccount> {
     this.pruneExpired();
     const email = input.email.trim().toLowerCase();
