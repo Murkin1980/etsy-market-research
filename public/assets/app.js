@@ -26,6 +26,8 @@
     etsyApiStatus: 'missing',
     billing: null,
     billingAccounts: [],
+    comparisonMode: false,
+    comparisonRunIds: new Set(),
   };
 
   const $ = (id) => document.getElementById(id);
@@ -153,6 +155,14 @@
     billingAdmin: $('billingAdmin'),
     billingAccountsBody: $('billingAccountsBody'),
     toastRegion: $('toastRegion'),
+    compareModeButton: $('compareModeButton'),
+    compareButton: $('compareButton'),
+    compareCount: $('compareCount'),
+    comparisonPanel: $('comparisonPanel'),
+    comparisonLoading: $('comparisonLoading'),
+    comparisonError: $('comparisonError'),
+    comparisonContent: $('comparisonContent'),
+    closeComparisonButton: $('closeComparisonButton'),
   };
 
   class ApiError extends Error {
@@ -601,7 +611,8 @@
     const entries = getVisibleEntries();
     elements.runsEmpty.hidden = entries.length > 0;
     for (const entry of entries) {
-      const button = createElement('button', `run-row${state.selectedId === entry.id ? ' is-selected' : ''}`);
+      const selectedForComparison = state.comparisonRunIds.has(entry.id);
+      const button = createElement('button', `run-row${state.selectedId === entry.id ? ' is-selected' : ''}${selectedForComparison ? ' is-compare-selected' : ''}`);
       button.type = 'button';
       button.dataset.entryId = entry.id;
       const main = createElement('span', 'run-main');
@@ -614,10 +625,90 @@
       icon.dataset.lucide = 'chevron-right';
       arrow.append(icon);
       button.append(main, status, signals, arrow);
-      button.addEventListener('click', () => void selectEntry(entry));
+      button.addEventListener('click', () => {
+        if (!state.comparisonMode) {
+          void selectEntry(entry);
+          return;
+        }
+        if (entry.status !== 'completed') {
+          showToast('Сравнивать можно только готовые отчёты.', 'error');
+          return;
+        }
+        if (selectedForComparison) state.comparisonRunIds.delete(entry.id);
+        else if (state.comparisonRunIds.size < 5) state.comparisonRunIds.add(entry.id);
+        else showToast('Можно выбрать не больше пяти ниш.', 'error');
+        updateComparisonControls();
+        renderRunsList();
+      });
       elements.runsList.append(button);
     }
     refreshIcons();
+  }
+
+  function updateComparisonControls() {
+    const count = state.comparisonRunIds.size;
+    elements.compareModeButton.classList.toggle('is-active', state.comparisonMode);
+    elements.compareModeButton.querySelector('span').textContent = state.comparisonMode ? 'Отменить выбор' : 'Выбрать для сравнения';
+    elements.compareButton.hidden = !state.comparisonMode;
+    elements.compareButton.disabled = count < 2;
+    elements.compareCount.textContent = `${count} из 5 · Сравнить`;
+  }
+
+  function metricRow(label, niches, formatter, source) {
+    const row = document.createElement('tr');
+    const heading = document.createElement('th');
+    heading.scope = 'row';
+    heading.append(createElement('strong', '', label), createElement('small', `data-source source-${source}`, source === 'etsy' ? 'Данные Etsy' : 'Расчёт Signal Lab'));
+    row.append(heading);
+    for (const niche of niches) row.append(createElement('td', '', formatter(niche)));
+    return row;
+  }
+
+  function renderComparison(payload) {
+    const niches = payload?.comparison?.niches || [];
+    const table = createElement('table', 'comparison-table');
+    const head = document.createElement('thead');
+    const headRow = document.createElement('tr');
+    headRow.append(document.createElement('th'));
+    for (const niche of niches) headRow.append(createElement('th', '', niche.query));
+    head.append(headRow);
+    const body = document.createElement('tbody');
+    body.append(
+      metricRow('Товаров в выборке', niches, (n) => String(n.listings), 'calculation'),
+      metricRow('Уникальных магазинов', niches, (n) => String(n.uniqueShops), 'calculation'),
+      metricRow('Медианная цена', niches, (n) => formatMoney(n.medianPriceUsd), 'calculation'),
+      metricRow('Диапазон цены', niches, (n) => `${formatMoney(n.priceMinUsd)} — ${formatMoney(n.priceMaxUsd)}`, 'calculation'),
+      metricRow('Цифровые товары', niches, (n) => `${n.digitalSharePercent}%`, 'calculation'),
+      metricRow('Покрытие favorites', niches, (n) => `${n.favoritesCoveragePercent}%`, 'calculation'),
+      metricRow('Медиана favorites', niches, (n) => n.medianFavorites === null ? '—' : String(n.medianFavorites), 'calculation'),
+      metricRow('Сильные сигналы', niches, (n) => `${n.highDemandSignals} high · ${n.mediumDemandSignals} medium`, 'calculation'),
+      metricRow('Уверенность данных', niches, (n) => `${n.evidenceConfidencePercent}%`, 'calculation'),
+      metricRow('Частые слова', niches, (n) => n.topKeywords.slice(0, 5).join(', ') || '—', 'calculation'),
+    );
+    table.append(head, body);
+    elements.comparisonContent.replaceChildren(table);
+    elements.comparisonContent.hidden = false;
+  }
+
+  async function compareSelectedRuns() {
+    elements.comparisonPanel.hidden = false;
+    elements.comparisonLoading.hidden = false;
+    elements.comparisonError.hidden = true;
+    elements.comparisonContent.hidden = true;
+    try {
+      const payload = await api('/comparisons', { method: 'POST', body: JSON.stringify({ runIds: [...state.comparisonRunIds] }) });
+      renderComparison(payload);
+      state.comparisonMode = false;
+      state.comparisonRunIds.clear();
+      updateComparisonControls();
+      renderRunsList();
+      elements.comparisonPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } catch (error) {
+      elements.comparisonError.textContent = error.message || 'Не удалось сравнить отчёты.';
+      elements.comparisonError.hidden = false;
+    } finally {
+      elements.comparisonLoading.hidden = true;
+    }
   }
 
   async function selectEntry(entry) {
@@ -1281,12 +1372,21 @@
       if (job) void selectEntry(normalizeJob(job));
     });
     elements.analyzeReportButton.addEventListener('click', () => void analyzeSelectedReport(false));
+    elements.compareModeButton.addEventListener('click', () => {
+      state.comparisonMode = !state.comparisonMode;
+      state.comparisonRunIds.clear();
+      updateComparisonControls();
+      renderRunsList();
+    });
+    elements.compareButton.addEventListener('click', () => void compareSelectedRuns());
+    elements.closeComparisonButton.addEventListener('click', () => { elements.comparisonPanel.hidden = true; });
   }
 
   async function init() {
     refreshIcons();
     setupEvents();
     updateResearchSummary();
+    updateComparisonControls();
     await refreshHealth();
     const restored = await restoreAccess();
     if (restored) await refreshProtectedData();

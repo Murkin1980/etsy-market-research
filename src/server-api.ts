@@ -41,6 +41,13 @@ export const AiAnalysisRequestSchema = z.object({
 
 export type AiAnalysisRequest = z.infer<typeof AiAnalysisRequestSchema>;
 
+export const NicheComparisonRequestSchema = z.object({
+  runIds: z.array(z.string().trim().min(1).max(100)).min(2).max(5)
+    .refine((ids) => new Set(ids).size === ids.length, 'Run identifiers must be unique'),
+}).strict();
+
+export type NicheComparisonRequest = z.infer<typeof NicheComparisonRequestSchema>;
+
 export const LoginRequestSchema = z.object({
   email: z.string().trim().email().max(254),
   password: z.string().min(12).max(128),
@@ -131,6 +138,12 @@ export function parseAiAnalysisRequest(input: unknown): AiAnalysisRequest {
   if (!parsed.success) {
     throw new RequestBodyError('Invalid AI analysis request', 400, parsed.error.flatten());
   }
+  return parsed.data;
+}
+
+export function parseNicheComparisonRequest(input: unknown): NicheComparisonRequest {
+  const parsed = NicheComparisonRequestSchema.safeParse(input);
+  if (!parsed.success) throw new RequestBodyError('Invalid niche comparison request', 400, parsed.error.flatten());
   return parsed.data;
 }
 

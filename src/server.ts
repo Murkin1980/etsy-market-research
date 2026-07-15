@@ -9,6 +9,7 @@ import {
   parseCheckoutRequest,
   parseJsonBody,
   parseAiAnalysisRequest,
+  parseNicheComparisonRequest,
   parseEtsyApiSettings,
   parseInviteRequest,
   parsePlanChangeRequest,
@@ -33,8 +34,10 @@ import { EncryptedCredentialStore } from './storage/encrypted-credential.js';
 import {
   createRunAiAnalysis,
   getRunAiAnalysis,
+  loadRunListings,
   RunReportError,
 } from './analysis/run-report-analyzer.js';
+import { compareNiches } from './analysis/niche-comparison.js';
 import { AccountStore } from './auth/account-store.js';
 import { authenticateRequest, clearSessionCookie, sessionCookie, type RequestPrincipal } from './auth/http-auth.js';
 import { RunOwnershipStore } from './storage/run-ownership.js';
@@ -47,7 +50,7 @@ const rateLimitMap = new Map<string, number[]>();
 const RATE_WINDOW_MS = 60_000;
 const MAX_CHILD_OUTPUT_BYTES = 1_000_000;
 const MIN_PRODUCTION_API_KEY_LENGTH = 24;
-const APP_VERSION = '1.6.2';
+const APP_VERSION = '1.7.0';
 const activeChildren = new Set<ReturnType<typeof spawn>>();
 const activeAiAnalyses = new Set<string>();
 let rateLimitChecks = 0;
@@ -618,6 +621,29 @@ const server = http.createServer(async (req, res) => {
       .filter((directory) => runOwnershipStore.canAccess(directory, principal.userId, principal.role))
       .map((directory) => ({ id: directory, ...readRunResult(path.join(runsDir, directory)) }));
     sendJson(res, 200, { runs, total: runs.length });
+    return;
+  }
+
+  if (url.pathname === '/comparisons' && req.method === 'POST') {
+    try {
+      const { runIds } = parseNicheComparisonRequest(await parseJsonBody(req, config.server.maxRequestBodyBytes));
+      const inputs = runIds.map((runId) => {
+        if (!runOwnershipStore.canAccess(runId, principal.userId, principal.role)) {
+          throw new RunReportError('Run not found', 404);
+        }
+        const result = readRunResult(path.join(config.paths.runs, runId));
+        if (!result || result.status !== 'completed') throw new RunReportError('Only completed reports can be compared', 422);
+        return { runId, query: result.query, listings: loadRunListings(config.paths.runs, runId) };
+      });
+      sendJson(res, 201, { comparison: compareNiches(inputs) });
+    } catch (error) {
+      if (error instanceof RequestBodyError) sendJson(res, error.statusCode, { error: error.message, details: error.details });
+      else if (error instanceof RunReportError) sendJson(res, error.statusCode, { error: error.message });
+      else {
+        log.error({ error: (error as Error).message }, 'Niche comparison failed');
+        sendJson(res, 500, { error: 'Niche comparison failed' });
+      }
+    }
     return;
   }
 

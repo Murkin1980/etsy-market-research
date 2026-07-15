@@ -45,7 +45,7 @@
             <i data-lucide="circle-user-round" aria-hidden="true"></i><span id="accountButtonText">Войти</span>
           </button>
         </div>
-        <p class="version-label">Production · v1.6.2</p>
+        <p class="version-label">Production · v1.7.0</p>
       </div>
     </aside>
 
@@ -227,7 +227,18 @@
             <button type="button" data-run-mode="runs">Отчёты <span id="runsCount">0</span></button>
           </div>
           <label class="search-filter" for="runSearch"><i data-lucide="search" aria-hidden="true"></i><span class="sr-only">Фильтр запусков</span><input id="runSearch" type="search" placeholder="Найти по запросу"></label>
+          <div class="compare-actions">
+            <button class="secondary-button" id="compareModeButton" type="button"><i data-lucide="columns-3" aria-hidden="true"></i><span>Выбрать для сравнения</span></button>
+            <button class="primary-button" id="compareButton" type="button" hidden disabled><span id="compareCount">0 из 5</span><i data-lucide="arrow-right" aria-hidden="true"></i></button>
+          </div>
         </div>
+
+        <section class="comparison-panel" id="comparisonPanel" hidden aria-labelledby="comparisonTitle">
+          <div class="comparison-head"><div><p class="eyebrow">Niche Compare</p><h2 id="comparisonTitle">Сравнение ниш</h2><p>Факты Etsy, расчёты Signal Lab и качество выборки показаны отдельно.</p></div><button class="icon-button" id="closeComparisonButton" type="button" aria-label="Закрыть сравнение"><i data-lucide="x" aria-hidden="true"></i></button></div>
+          <div class="comparison-loading" id="comparisonLoading" hidden>Собираем показатели выбранных отчётов…</div>
+          <p class="detail-error" id="comparisonError" hidden></p>
+          <div class="comparison-table-wrap" id="comparisonContent" hidden></div>
+        </section>
 
         <div class="runs-workspace">
           <section class="runs-list" aria-label="Список запусков">

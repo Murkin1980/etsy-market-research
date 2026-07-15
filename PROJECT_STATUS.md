@@ -2,6 +2,20 @@
 
 Last updated: 2026-07-15
 
+## Stage 9 — v1.7.0 Niche Compare
+
+Status: **In progress — verification and deployment**
+
+`[████████░░] 80%`
+
+- [x] Compare 2–5 saved research reports
+- [x] Price, shop, product type, favorites and demand-signal metrics
+- [x] Distinguish Etsy data from Signal Lab calculations
+- [x] Responsive comparison table
+- [x] Ownership checks and API validation
+- [ ] Full automated checks and production smoke test
+- [ ] AI ranking and token accounting — next focused slice
+
 ## Goal
 
 Build a reliable Etsy market-research pipeline that collects search and listing data, normalizes it, calculates explainable demand signals, exports reproducible reports, and optionally adds LLM-assisted competitive analysis.

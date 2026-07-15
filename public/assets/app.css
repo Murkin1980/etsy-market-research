@@ -280,6 +280,22 @@ input[type="range"] { width: 100%; height: 5px; margin: 9px 0 3px; accent-color:
 .job-message { min-height: 34px; margin: 16px 0; color: var(--ink-soft); font-size: 11px; }
 
 .runs-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-bottom: 18px; }
+.compare-actions { display: flex; gap: 10px; align-items: center; }
+.secondary-button.is-active { border-color: var(--orange); color: var(--orange); background: #fff7ef; }
+.comparison-panel { margin-bottom: 20px; padding: 26px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
+.comparison-head { display: flex; justify-content: space-between; gap: 24px; align-items: flex-start; margin-bottom: 20px; }
+.comparison-head h2 { margin: 3px 0 6px; font-size: 26px; }
+.comparison-head p:last-child { margin: 0; color: var(--muted); }
+.comparison-table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 14px; }
+.comparison-table { width: 100%; min-width: 760px; border-collapse: collapse; background: #fff; }
+.comparison-table th, .comparison-table td { padding: 14px 16px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+.comparison-table thead th { background: #f6f0e7; font-size: 14px; }
+.comparison-table tbody th { width: 190px; font-weight: 500; }
+.comparison-table tbody th strong { display: block; }
+.data-source { display: block; margin-top: 4px; font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
+.source-etsy { color: #217a57; }
+.source-calculation { color: #8a5b1e; }
+.comparison-loading { padding: 18px; color: var(--muted); }
 .segmented-control { display: inline-flex; padding: 3px; background: var(--paper-deep); border: 1px solid var(--line); border-radius: 10px; }
 .segmented-control button { display: inline-flex; align-items: center; gap: 8px; min-height: 34px; padding: 0 12px; color: var(--ink-soft); background: transparent; border: 0; border-radius: 7px; font-size: 11px; }
 .segmented-control button span { display: grid; place-items: center; min-width: 19px; height: 19px; padding: 0 5px; color: var(--ink-faint); background: rgba(0,0,0,.05); border-radius: 999px; font-size: 9px; }
@@ -295,6 +311,7 @@ input[type="range"] { width: 100%; height: 5px; margin: 9px 0 3px; accent-color:
 .run-row { width: 100%; padding: 15px 16px; background: transparent; border: 0; border-bottom: 1px solid #e8e0d5; text-align: left; transition: background .15s ease; }
 .run-row:hover, .run-row.is-selected { background: #faf5ed; }
 .run-row.is-selected { box-shadow: inset 3px 0 var(--orange); }
+.run-row.is-compare-selected { background: #fff3e6; box-shadow: inset 4px 0 var(--orange); }
 .run-main strong, .run-main small { display: block; }
 .run-main strong { overflow: hidden; font-size: 12px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
 .run-main small, .run-signals { margin-top: 3px; color: var(--ink-faint); font-size: 9px; }
@@ -554,6 +571,8 @@ input[type="range"] { width: 100%; height: 5px; margin: 9px 0 3px; accent-color:
   .launch-button { width: 100%; }
   .launch-rail { grid-template-columns: 1fr; }
   .runs-toolbar { align-items: stretch; flex-direction: column; }
+  .compare-actions { flex-direction: column; align-items: stretch; }
+  .comparison-panel { padding: 18px 14px; }
   .search-filter { width: 100%; }
   .runs-list-head { display: none; }
   .run-row { grid-template-columns: minmax(0,1fr) auto 30px; gap: 9px; }
