@@ -5,6 +5,7 @@ import {
   buildCliParams,
   getClientIp,
   parseEtsyApiSettings,
+  parseAiAnalysisRequest,
   parseJsonBody,
   parseResearchJobRequest,
   parseRunResultOutput,
@@ -51,6 +52,12 @@ describe('server API helpers', () => {
       keystring: 'key:secret',
       sharedSecret: 'shared-secret-9876',
     })).toThrow(RequestBodyError);
+  });
+
+  it('validates AI analysis regeneration options', () => {
+    expect(parseAiAnalysisRequest({})).toEqual({ force: false });
+    expect(parseAiAnalysisRequest({ force: true })).toEqual({ force: true });
+    expect(() => parseAiAnalysisRequest({ force: 'yes' })).toThrow(RequestBodyError);
   });
 
   it('builds isolated CLI arguments from validated options', () => {

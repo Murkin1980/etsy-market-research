@@ -140,7 +140,7 @@ export const LlmAnalysisResultSchema = z.object({
       rank: z.number(),
       listingId: z.string(),
       title: z.string(),
-      url: z.string().url(),
+      url: z.string(),
       mainUSP: z.string(),
       targetAudience: z.array(z.string()),
       strengths: z.array(z.string()),

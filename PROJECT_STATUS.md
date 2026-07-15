@@ -136,6 +136,31 @@ Status: **Completed; Etsy application activation pending**
 - [x] Pass typecheck, lint, 93/93 tests, build, API smoke, desktop/mobile browser checks, and a clean-load console check.
 - [ ] Wait for Etsy to activate the submitted application, then save the active key through Signal Lab and run the first production API research.
 
+## Stage 10 — AI Market Analyst
+
+Status: **Completed**
+
+- [x] Add post-run AI analysis for any completed Etsy report without repeating data collection.
+- [x] Calculate prices, coverage, confidence, repeated terms, and warnings deterministically before sending evidence to the model.
+- [x] Use the OpenAI Responses API with strict structured output and a dedicated project key.
+- [x] Prevent unsupported sales claims and replace model-supplied competitor URLs with links verified against source listing IDs.
+- [x] Add authenticated `GET` and `POST /runs/:id/ai-analysis` endpoints with traversal protection and duplicate-run guards.
+- [x] Add a responsive Russian-language AI report: product concept, audience, price, package, image plan, market gaps, features, competitors, risks, and refresh action.
+- [x] Save each result as the allowlisted `market-analysis.json` report file.
+- [x] Pass typecheck, lint, 97/97 tests, build, live structured-output smoke, desktop/mobile visual checks, and a zero-error browser-console check.
+
+Release verification:
+
+```text
+npm run check      PASS (typecheck + lint + 97/97 tests + build)
+npm run smoke:ai   PASS (gpt-5.6-luna structured output)
+desktop UI         PASS (complete AI report and source-linked competitor)
+mobile UI          PASS (390 x 844, no horizontal overflow)
+browser console    PASS (0 errors, 0 warnings)
+```
+
+Next product stage: replace the temporary shared production API key with user accounts and per-user workspaces before offering Signal Lab as a public commercial product.
+
 Official API flow:
 
 ```text
