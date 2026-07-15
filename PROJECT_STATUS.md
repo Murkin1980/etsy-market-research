@@ -2,6 +2,19 @@
 
 Last updated: 2026-07-15
 
+## Stage 10 — v1.7.1 Readable report workspace
+
+Status: **In progress — verification and deployment**
+
+`[████████░░] 80%`
+
+- [x] Full-width selected report instead of a narrow side column
+- [x] Separate Summary, AI Decision, and Report Files tabs
+- [x] 16–17 px body copy and larger key metrics
+- [x] Larger report rows, competitor links, shop links, and file controls
+- [x] Laptop and mobile responsive rules
+- [ ] Automated checks and production verification
+
 ## Stage 9 — v1.7.0 Niche Compare
 
 Status: **Completed and deployed**

@@ -728,10 +728,22 @@
     elements.detailMedian.textContent = formatMoney(result.medianPriceUsd);
     elements.detailDuration.textContent = formatDuration(result.durationMs);
     elements.detailCompleted.textContent = formatDate(entry.completedAt);
+    setReportTab('summary');
     const error = entry.error || result.error || '';
     elements.detailError.hidden = !error;
     elements.detailError.textContent = error;
     await Promise.all([loadRunFiles(entry.runId), loadAiAnalysis(entry.runId)]);
+  }
+
+  function setReportTab(tabName) {
+    document.querySelectorAll('[data-report-tab]').forEach((button) => {
+      const active = button.dataset.reportTab === tabName;
+      button.classList.toggle('is-active', active);
+      button.setAttribute('aria-selected', String(active));
+    });
+    document.querySelectorAll('[data-report-panel]').forEach((panel) => {
+      panel.hidden = panel.dataset.reportPanel !== tabName;
+    });
   }
 
   function setAiAnalysisState(mode, message = '') {
@@ -1380,6 +1392,7 @@
     });
     elements.compareButton.addEventListener('click', () => void compareSelectedRuns());
     elements.closeComparisonButton.addEventListener('click', () => { elements.comparisonPanel.hidden = true; });
+    document.querySelectorAll('[data-report-tab]').forEach((button) => button.addEventListener('click', () => setReportTab(button.dataset.reportTab)));
   }
 
   async function init() {
