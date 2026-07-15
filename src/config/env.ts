@@ -67,6 +67,7 @@ export const config = {
     maxQueuedJobs: envInt('MAX_QUEUED_JOBS', 50),
     maxJobsRetained: envInt('MAX_JOBS_RETAINED', 100),
     maxRequestBodyBytes: envInt('MAX_REQUEST_BODY_BYTES', 16_384),
+    sessionTtlDays: envInt('SESSION_TTL_DAYS', 7),
   },
   logging: {
     level: env('LOG_LEVEL', 'info'),
@@ -78,6 +79,7 @@ export const config = {
     reports: path.resolve('data/reports'),
     checkpoints: path.resolve('data/checkpoints'),
     settings: path.resolve('data/settings'),
+    auth: path.resolve('data/auth'),
     runs: path.resolve('data/runs'),
     logs: path.resolve('logs'),
   },

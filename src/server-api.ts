@@ -41,6 +41,24 @@ export const AiAnalysisRequestSchema = z.object({
 
 export type AiAnalysisRequest = z.infer<typeof AiAnalysisRequestSchema>;
 
+export const LoginRequestSchema = z.object({
+  email: z.string().trim().email().max(254),
+  password: z.string().min(12).max(128),
+}).strict();
+
+export const RegisterRequestSchema = LoginRequestSchema.extend({
+  name: z.string().trim().min(2).max(80),
+  inviteCode: z.string().trim().min(20).max(100),
+}).strict();
+
+export const InviteRequestSchema = z.object({
+  role: z.enum(['admin', 'member']).default('member'),
+}).strict();
+
+export type LoginRequest = z.infer<typeof LoginRequestSchema>;
+export type RegisterRequest = z.infer<typeof RegisterRequestSchema>;
+export type InviteRequest = z.infer<typeof InviteRequestSchema>;
+
 export interface RunResultPayload {
   status: 'completed' | 'failed';
   query: string;
@@ -103,6 +121,24 @@ export function parseAiAnalysisRequest(input: unknown): AiAnalysisRequest {
   if (!parsed.success) {
     throw new RequestBodyError('Invalid AI analysis request', 400, parsed.error.flatten());
   }
+  return parsed.data;
+}
+
+export function parseLoginRequest(input: unknown): LoginRequest {
+  const parsed = LoginRequestSchema.safeParse(input);
+  if (!parsed.success) throw new RequestBodyError('Invalid login request', 400, parsed.error.flatten());
+  return parsed.data;
+}
+
+export function parseRegisterRequest(input: unknown): RegisterRequest {
+  const parsed = RegisterRequestSchema.safeParse(input);
+  if (!parsed.success) throw new RequestBodyError('Invalid registration request', 400, parsed.error.flatten());
+  return parsed.data;
+}
+
+export function parseInviteRequest(input: unknown): InviteRequest {
+  const parsed = InviteRequestSchema.safeParse(input);
+  if (!parsed.success) throw new RequestBodyError('Invalid invitation request', 400, parsed.error.flatten());
   return parsed.data;
 }
 

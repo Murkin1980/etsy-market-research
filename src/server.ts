@@ -9,10 +9,12 @@ import {
   parseJsonBody,
   parseAiAnalysisRequest,
   parseEtsyApiSettings,
+  parseInviteRequest,
   parseResearchJobRequest,
+  parseLoginRequest,
+  parseRegisterRequest,
   parseRunResultOutput,
   RequestBodyError,
-  secretsEqual,
   type RunResultPayload,
 } from './server-api.js';
 import {
@@ -30,6 +32,9 @@ import {
   getRunAiAnalysis,
   RunReportError,
 } from './analysis/run-report-analyzer.js';
+import { AccountStore } from './auth/account-store.js';
+import { authenticateRequest, clearSessionCookie, sessionCookie, type RequestPrincipal } from './auth/http-auth.js';
+import { RunOwnershipStore } from './storage/run-ownership.js';
 
 const log = createChildLogger('server');
 
@@ -37,7 +42,7 @@ const rateLimitMap = new Map<string, number[]>();
 const RATE_WINDOW_MS = 60_000;
 const MAX_CHILD_OUTPUT_BYTES = 1_000_000;
 const MIN_PRODUCTION_API_KEY_LENGTH = 24;
-const APP_VERSION = '1.4.1';
+const APP_VERSION = '1.5.0';
 const activeChildren = new Set<ReturnType<typeof spawn>>();
 const activeAiAnalyses = new Set<string>();
 let rateLimitChecks = 0;
@@ -46,6 +51,11 @@ let etsyApiStatus: 'missing' | 'checking' | 'verified' | 'invalid' = runtimeEtsy
   ? 'checking'
   : 'missing';
 let credentialStore: EncryptedCredentialStore | null = null;
+const accountStore = new AccountStore(
+  path.join(config.paths.auth, 'accounts.json'),
+  config.server.sessionTtlDays,
+);
+const runOwnershipStore = new RunOwnershipStore(path.join(config.paths.auth, 'run-owners.json'));
 
 function checkRateLimit(ip: string): boolean {
   const limit = config.server.rateLimitPerMinute;
@@ -70,13 +80,6 @@ function checkRateLimit(ip: string): boolean {
   recent.push(now);
   rateLimitMap.set(ip, recent);
   return true;
-}
-
-function checkApiKey(req: http.IncomingMessage): boolean {
-  if (!config.server.apiKey) return !config.server.requireApiKey;
-  const authHeader = req.headers.authorization ?? '';
-  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
-  return secretsEqual(token, config.server.apiKey);
 }
 
 function readRunResult(runDir: string): RunResultPayload | null {
@@ -126,6 +129,8 @@ function executeCliJob(job: ResearchJob): Promise<RunResultPayload> {
 
       const result = parseRunResultOutput(stdout);
       if (result) {
+        const runId = result.runDir ? path.basename(result.runDir) : '';
+        if (runId) runOwnershipStore.assign(runId, job.ownerId);
         if (result.status === 'completed') {
           log.info({ jobId: job.id, runDir: result.runDir }, 'Job completed');
         } else {
@@ -161,6 +166,24 @@ const jobManager = new JobManager({
 function sendJson(res: http.ServerResponse, status: number, data: unknown): void {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
   res.end(JSON.stringify(data, null, 2));
+}
+
+function principalPayload(principal: RequestPrincipal, csrfToken: string | null): Record<string, unknown> {
+  return {
+    authenticated: true,
+    user: principal.account ?? {
+      id: principal.userId,
+      email: principal.authType === 'api-key' ? 'admin@local' : 'local@development',
+      name: principal.authType === 'api-key' ? 'Production administrator' : 'Local administrator',
+      role: principal.role,
+    },
+    authType: principal.authType,
+    csrfToken,
+  };
+}
+
+function isStateChanging(method: string | undefined): boolean {
+  return method === 'POST' || method === 'PUT' || method === 'PATCH' || method === 'DELETE';
 }
 
 function applyUiSecurityHeaders(res: http.ServerResponse): void {
@@ -201,7 +224,7 @@ function applyCors(req: http.IncomingMessage, res: http.ServerResponse): void {
     res.setHeader('Vary', 'Origin');
   }
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-CSRF-Token');
 }
 
 if (config.server.requireApiKey && !config.server.apiKey) {
@@ -271,12 +294,8 @@ const server = http.createServer(async (req, res) => {
       etsyApiStatus,
       aiAnalysisConfigured: Boolean(config.openaiApiKey),
       aiAnalysisModel: config.openaiModel,
+      authentication: 'accounts-and-admin-key',
     });
-    return;
-  }
-
-  if (!checkApiKey(req)) {
-    sendJson(res, 401, { error: 'Unauthorized. Provide Authorization: Bearer <API_KEY>' });
     return;
   }
 
@@ -290,6 +309,105 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (url.pathname === '/auth/register' && req.method === 'POST') {
+    try {
+      const input = parseRegisterRequest(await parseJsonBody(req, config.server.maxRequestBodyBytes));
+      const account = await accountStore.register(input);
+      const session = accountStore.createSession(account.id);
+      res.setHeader('Set-Cookie', sessionCookie(session.token, config.server.sessionTtlDays * 86_400, config.isProduction));
+      sendJson(res, 201, {
+        authenticated: true,
+        user: account,
+        authType: 'session',
+        csrfToken: session.csrfToken,
+      });
+    } catch (error) {
+      if (error instanceof RequestBodyError) {
+        sendJson(res, error.statusCode, { error: error.message, details: error.details });
+      } else {
+        sendJson(res, 422, { error: (error as Error).message });
+      }
+    }
+    return;
+  }
+
+  if (url.pathname === '/auth/login' && req.method === 'POST') {
+    try {
+      const input = parseLoginRequest(await parseJsonBody(req, config.server.maxRequestBodyBytes));
+      const account = await accountStore.verifyPassword(input.email, input.password);
+      if (!account) {
+        sendJson(res, 401, { error: 'Email or password is incorrect' });
+        return;
+      }
+      const session = accountStore.createSession(account.id);
+      res.setHeader('Set-Cookie', sessionCookie(session.token, config.server.sessionTtlDays * 86_400, config.isProduction));
+      sendJson(res, 200, {
+        authenticated: true,
+        user: account,
+        authType: 'session',
+        csrfToken: session.csrfToken,
+      });
+    } catch (error) {
+      if (error instanceof RequestBodyError) {
+        sendJson(res, error.statusCode, { error: error.message, details: error.details });
+      } else {
+        log.error({ error: (error as Error).message }, 'Login failed');
+        sendJson(res, 500, { error: 'Login failed' });
+      }
+    }
+    return;
+  }
+
+  const principal = authenticateRequest(req, accountStore, config.server.apiKey, config.server.requireApiKey);
+
+  if (url.pathname === '/auth/me' && req.method === 'GET') {
+    if (!principal) {
+      sendJson(res, 200, { authenticated: false });
+      return;
+    }
+    const csrfToken = principal.sessionId ? accountStore.rotateCsrf(principal.sessionId) : null;
+    sendJson(res, 200, principalPayload(principal, csrfToken));
+    return;
+  }
+
+  if (!principal) {
+    sendJson(res, 401, { error: 'Authentication required' });
+    return;
+  }
+
+  if (principal.sessionId && isStateChanging(req.method)) {
+    const csrfToken = Array.isArray(req.headers['x-csrf-token'])
+      ? req.headers['x-csrf-token'][0]
+      : req.headers['x-csrf-token'] ?? '';
+    if (!accountStore.verifyCsrf(principal.sessionId, csrfToken)) {
+      sendJson(res, 403, { error: 'Security token is missing or expired. Refresh the page and try again.' });
+      return;
+    }
+  }
+
+  if (url.pathname === '/auth/logout' && req.method === 'POST') {
+    if (principal.sessionId) accountStore.deleteSession(principal.sessionId);
+    res.setHeader('Set-Cookie', clearSessionCookie(config.isProduction));
+    sendJson(res, 200, { authenticated: false });
+    return;
+  }
+
+  if (url.pathname === '/admin/invites' && req.method === 'POST') {
+    if (principal.role !== 'admin') {
+      sendJson(res, 403, { error: 'Administrator access is required' });
+      return;
+    }
+    try {
+      const input = parseInviteRequest(await parseJsonBody(req, config.server.maxRequestBodyBytes));
+      const invite = accountStore.createInvite(principal.userId, input.role);
+      sendJson(res, 201, { ...invite, role: input.role });
+    } catch (error) {
+      if (error instanceof RequestBodyError) sendJson(res, error.statusCode, { error: error.message, details: error.details });
+      else sendJson(res, 500, { error: 'Failed to create invitation' });
+    }
+    return;
+  }
+
   if (url.pathname === '/settings/etsy-api' && req.method === 'GET') {
     sendJson(res, 200, {
       configured: Boolean(runtimeEtsyApiKey),
@@ -300,6 +418,10 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (url.pathname === '/settings/etsy-api' && req.method === 'PUT') {
+    if (principal.role !== 'admin') {
+      sendJson(res, 403, { error: 'Administrator access is required' });
+      return;
+    }
     if (!credentialStore) {
       sendJson(res, 503, { error: 'Encrypted credential storage is not available' });
       return;
@@ -328,7 +450,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (url.pathname === '/jobs' && req.method === 'GET') {
-    const jobs = jobManager.list();
+    const jobs = jobManager.list(principal.userId, principal.role === 'admin');
     sendJson(res, 200, { jobs, total: jobs.length });
     return;
   }
@@ -346,7 +468,7 @@ const server = http.createServer(async (req, res) => {
         });
         return;
       }
-      const { job, queuePosition } = jobManager.enqueue(request);
+      const { job, queuePosition } = jobManager.enqueue(request, principal.userId);
       log.info({ jobId: job.id, query: job.query }, 'Job queued');
 
       sendJson(res, 202, {
@@ -369,7 +491,7 @@ const server = http.createServer(async (req, res) => {
 
   if (url.pathname.startsWith('/jobs/') && req.method === 'GET') {
     const jobId = url.pathname.split('/')[2];
-    const job = jobManager.get(jobId);
+    const job = jobManager.get(jobId, principal.userId, principal.role === 'admin');
     if (!job) {
       sendJson(res, 404, { error: 'Job not found' });
       return;
@@ -386,6 +508,7 @@ const server = http.createServer(async (req, res) => {
     }
     const runs = fs.readdirSync(runsDir)
       .filter((directory) => !directory.startsWith('.'))
+      .filter((directory) => runOwnershipStore.canAccess(directory, principal.userId, principal.role))
       .map((directory) => ({ id: directory, ...readRunResult(path.join(runsDir, directory)) }));
     sendJson(res, 200, { runs, total: runs.length });
     return;
@@ -396,6 +519,10 @@ const server = http.createServer(async (req, res) => {
     const runId = decodePathSegment(runAiAnalysisMatch[1]);
     if (!runId) {
       sendJson(res, 400, { error: 'Invalid run identifier' });
+      return;
+    }
+    if (!runOwnershipStore.canAccess(runId, principal.userId, principal.role)) {
+      sendJson(res, 404, { error: 'Run not found' });
       return;
     }
     try {
@@ -450,6 +577,10 @@ const server = http.createServer(async (req, res) => {
       sendJson(res, 400, { error: 'Invalid run identifier' });
       return;
     }
+    if (!runOwnershipStore.canAccess(runId, principal.userId, principal.role)) {
+      sendJson(res, 404, { error: 'Run not found' });
+      return;
+    }
     const files = listRunFiles(config.paths.runs, runId);
     if (!files) {
       sendJson(res, 404, { error: 'Run not found' });
@@ -465,6 +596,10 @@ const server = http.createServer(async (req, res) => {
     const fileName = decodePathSegment(runFileMatch[2]);
     if (!runId || !fileName) {
       sendJson(res, 400, { error: 'Invalid run file path' });
+      return;
+    }
+    if (!runOwnershipStore.canAccess(runId, principal.userId, principal.role)) {
+      sendJson(res, 404, { error: 'Run file not found' });
       return;
     }
     const file = resolveRunFile(config.paths.runs, runId, fileName);
@@ -491,6 +626,10 @@ server.listen(port, config.server.host, () => {
   console.log(`Etsy Research API on http://${config.server.host}:${port}`);
   console.log('Endpoints:');
   console.log('  GET  /health           - Health check (public)');
+  console.log('  POST /auth/login       - Start an account session');
+  console.log('  POST /auth/register    - Create an invited account');
+  console.log('  GET  /auth/me          - Read the current session');
+  console.log('  POST /admin/invites    - Create a one-time invitation (admin)');
   console.log('  GET  /jobs             - List jobs');
   console.log('  POST /jobs             - Create a validated research job');
   console.log('  GET  /jobs/:id         - Job status');
@@ -498,7 +637,7 @@ server.listen(port, config.server.host, () => {
   console.log('  GET  /runs/:id/ai-analysis - Read report analysis');
   console.log('  POST /runs/:id/ai-analysis - Analyze a completed report');
   console.log('  PUT  /settings/etsy-api - Verify and save Etsy API credentials');
-  if (config.server.apiKey) console.log('  Auth: Authorization: Bearer <API_KEY>');
+  if (config.server.apiKey) console.log('  Auth: account session or administrative Bearer API key');
 
   if (runtimeEtsyApiKey) {
     void verifyEtsyApiKey(runtimeEtsyApiKey)

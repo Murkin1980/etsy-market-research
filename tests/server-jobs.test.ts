@@ -111,4 +111,21 @@ describe('API job lifecycle', () => {
     expect(() => manager.enqueue(parseResearchJobRequest({ query: 'rejected' })))
       .toThrow(JobQueueFullError);
   });
+
+  it('filters retained jobs by workspace owner', async () => {
+    let nextId = 0;
+    const manager = new JobManager({
+      maxConcurrent: 2,
+      maxQueued: 2,
+      maxRetained: 10,
+      createId: () => `workspace-${++nextId}`,
+      execute: async (job) => completedResult(job.query),
+    });
+    const first = manager.enqueue(parseResearchJobRequest({ query: 'first' }), 'user-a').job;
+    manager.enqueue(parseResearchJobRequest({ query: 'second' }), 'user-b');
+    await flush();
+    expect(manager.list('user-a')).toEqual([first]);
+    expect(manager.get(first.id, 'user-b')).toBeUndefined();
+    expect(manager.list('admin', true)).toHaveLength(2);
+  });
 });

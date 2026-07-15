@@ -7,6 +7,8 @@ import {
   parseEtsyApiSettings,
   parseAiAnalysisRequest,
   parseJsonBody,
+  parseLoginRequest,
+  parseRegisterRequest,
   parseResearchJobRequest,
   parseRunResultOutput,
   RequestBodyError,
@@ -58,6 +60,19 @@ describe('server API helpers', () => {
     expect(parseAiAnalysisRequest({})).toEqual({ force: false });
     expect(parseAiAnalysisRequest({ force: true })).toEqual({ force: true });
     expect(() => parseAiAnalysisRequest({ force: 'yes' })).toThrow(RequestBodyError);
+  });
+
+  it('validates account login and invitation registration fields', () => {
+    expect(parseLoginRequest({ email: 'owner@example.com', password: 'correct horse battery' })).toMatchObject({
+      email: 'owner@example.com',
+    });
+    expect(() => parseLoginRequest({ email: 'bad', password: 'short' })).toThrow(RequestBodyError);
+    expect(parseRegisterRequest({
+      email: 'member@example.com',
+      password: 'another strong password',
+      name: 'Member',
+      inviteCode: 'invite_12345678901234567890',
+    })).toMatchObject({ name: 'Member' });
   });
 
   it('builds isolated CLI arguments from validated options', () => {

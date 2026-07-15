@@ -210,7 +210,7 @@ td strong { display: block; color: var(--ink); font-size: 13px; font-weight: 650
 .prominent-field { margin-top: 28px; }
 .input-with-icon { position: relative; }
 .input-with-icon > svg { position: absolute; top: 50%; left: 16px; width: 19px; color: var(--ink-faint); transform: translateY(-50%); pointer-events: none; }
-input[type="text"], input[type="password"], input[type="search"], select { width: 100%; min-height: 44px; padding: 0 13px; color: var(--ink); background: #fbf8f2; border: 1px solid var(--line); border-radius: 10px; transition: border-color .18s ease, box-shadow .18s ease, background .18s ease; }
+input[type="text"], input[type="email"], input[type="password"], input[type="search"], select { width: 100%; min-height: 44px; padding: 0 13px; color: var(--ink); background: #fbf8f2; border: 1px solid var(--line); border-radius: 10px; transition: border-color .18s ease, box-shadow .18s ease, background .18s ease; }
 .input-with-icon input { min-height: 54px; padding-left: 48px; font-size: 16px; }
 input:hover, select:hover { border-color: var(--line-strong); }
 input:focus, select:focus { background: #fff; border-color: var(--orange); box-shadow: 0 0 0 3px rgba(241,100,30,.1); outline: none; }
@@ -401,6 +401,27 @@ input[type="range"] { width: 100%; height: 5px; margin: 9px 0 3px; accent-color:
 .access-dialog { width: min(470px, calc(100% - 28px)); padding: 0; color: var(--ink); background: var(--surface); border: 0; border-radius: 20px; box-shadow: 0 30px 100px rgba(0,0,0,.32); }
 .access-dialog::backdrop { background: rgba(20,17,14,.68); backdrop-filter: blur(8px); }
 .access-dialog form { padding: 34px; }
+.account-dialog .account-dialog-body { padding: 34px; }
+.account-dialog form { padding: 0; }
+.auth-tabs { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 4px; margin: 0 0 20px; padding: 4px; background: var(--paper-deep); border-radius: 10px; }
+.auth-tabs button { min-height: 36px; padding: 6px; color: var(--ink-soft); background: transparent; border: 0; border-radius: 7px; font-size: 9px; font-weight: 650; }
+.auth-tabs button.is-active { color: var(--ink); background: var(--surface); box-shadow: 0 1px 5px rgba(40,31,24,.1); }
+.account-dialog .credential-fields { gap: 13px; }
+.auth-panel-note { margin: 0; color: var(--ink-soft); font-size: 10px; line-height: 1.5; }
+.auth-read-only { display: block; margin: 14px auto 0; }
+.account-session { display: grid; gap: 20px; }
+.account-identity { display: grid; grid-template-columns: 42px minmax(0,1fr) auto; align-items: center; gap: 11px; padding: 12px; background: var(--paper-deep); border-radius: 11px; }
+.account-avatar { display: grid; place-items: center; width: 42px; height: 42px; color: #fff; background: var(--orange-dark); border-radius: 50%; font-size: 17px; font-weight: 750; }
+.account-identity strong, .account-identity span { display: block; }
+.account-identity strong { font-size: 12px; }
+.account-identity div > span { margin-top: 2px; color: var(--ink-soft); font-size: 9px; }
+.invite-tool { display: grid; gap: 7px; }
+.invite-tool > label { font-size: 10px; font-weight: 650; }
+.invite-actions { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 8px; }
+.invite-actions select { width: 100%; min-height: 40px; padding: 0 12px; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 9px; }
+.invite-tool output { padding: 10px; overflow-wrap: anywhere; color: var(--ink); background: var(--orange-soft); border-radius: 9px; font-family: ui-monospace, monospace; font-size: 9px; user-select: all; }
+.danger-text-button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 40px; padding: 0 12px; color: var(--red); background: transparent; border: 0; font-weight: 650; }
+.danger-text-button svg { width: 15px; }
 .dialog-mark { display: grid; place-items: center; width: 46px; height: 46px; margin-bottom: 22px; color: var(--orange-dark); background: var(--orange-soft); border-radius: 14px; transform: rotate(-4deg); }
 .dialog-mark svg { width: 21px; }
 .access-dialog h2 { margin: 0; font-size: 27px; letter-spacing: -.04em; }
@@ -506,6 +527,9 @@ input[type="range"] { width: 100%; height: 5px; margin: 9px 0 3px; accent-color:
   .ai-concept-head, .ai-analysis-actions { align-items: stretch; flex-direction: column; }
   .ai-price, .ai-analysis-actions small { text-align: left; }
   .access-dialog form { padding: 26px 20px; }
+  .account-dialog .account-dialog-body { padding: 26px 20px; }
+  .account-dialog form { padding: 0; }
+  .auth-tabs { grid-template-columns: 1fr; }
   .dialog-actions { align-items: stretch; flex-direction: column-reverse; }
   .dialog-actions button { width: 100%; }
 }

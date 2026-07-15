@@ -39,10 +39,10 @@
             <span id="sidebarStatusText">Проверяем сервер</span>
           </div>
           <button class="text-button" id="accessButton" type="button">
-            <i data-lucide="key-round" aria-hidden="true"></i><span>API-доступ</span>
+            <i data-lucide="circle-user-round" aria-hidden="true"></i><span id="accountButtonText">Войти</span>
           </button>
         </div>
-        <p class="version-label">Production · v1.4.1</p>
+        <p class="version-label">Production · v1.5.0</p>
       </div>
     </aside>
 
@@ -264,16 +264,51 @@
     </main>
   </div>
 
-  <dialog class="access-dialog" id="accessDialog" aria-labelledby="accessTitle">
-    <form method="dialog" id="accessForm">
-      <div class="dialog-mark"><i data-lucide="key-round" aria-hidden="true"></i></div>
-      <p class="eyebrow">Защищённое соединение</p>
-      <h2 id="accessTitle">Подключить панель</h2>
-      <p>В Secret Manager откройте <strong>etsy-production-env</strong> и вставьте только значение строки <strong>API_KEY</strong>. Ключ хранится только в текущей вкладке браузера.</p>
-      <div class="field-group"><label for="apiKeyInput">Ключ доступа к панели</label><div class="input-with-action"><input id="apiKeyInput" type="password" minlength="24" autocomplete="off" spellcheck="false" placeholder="Значение после API_KEY="><button class="icon-button" id="toggleKeyButton" type="button" aria-label="Показать ключ"><i data-lucide="eye" aria-hidden="true"></i></button></div><p class="field-error" id="accessError" role="alert" hidden></p></div>
-      <div class="dialog-actions"><button class="secondary-button" id="readOnlyButton" type="button">Только статус</button><button class="primary-button" id="connectButton" type="submit"><i data-lucide="plug-zap" aria-hidden="true"></i><span>Подключиться</span></button></div>
-      <div class="dialog-security"><i data-lucide="lock-keyhole" aria-hidden="true"></i><span>Ключ не записывается в cookies, URL или журналы сервера.</span></div>
-    </form>
+  <dialog class="access-dialog account-dialog" id="accessDialog" aria-labelledby="accessTitle">
+    <div class="account-dialog-body">
+      <div class="dialog-mark"><i data-lucide="circle-user-round" aria-hidden="true"></i></div>
+      <p class="eyebrow">Персональное рабочее пространство</p>
+      <h2 id="accessTitle">Войти в Signal Lab</h2>
+      <p id="accessLead">Ваши исследования и отчёты будут доступны только вашему аккаунту.</p>
+
+      <div class="auth-tabs" id="authTabs" role="tablist" aria-label="Способ входа">
+        <button class="is-active" type="button" role="tab" aria-selected="true" data-auth-mode="login">Вход</button>
+        <button type="button" role="tab" aria-selected="false" data-auth-mode="register">Регистрация</button>
+        <button type="button" role="tab" aria-selected="false" data-auth-mode="key">Ключ администратора</button>
+      </div>
+
+      <form id="loginForm" class="credential-fields" data-auth-panel="login">
+        <div class="field-group"><label for="loginEmailInput">Email</label><input id="loginEmailInput" type="email" maxlength="254" autocomplete="email" required placeholder="name@example.com"></div>
+        <div class="field-group"><label for="loginPasswordInput">Пароль</label><input id="loginPasswordInput" type="password" minlength="12" maxlength="128" autocomplete="current-password" required placeholder="Не менее 12 символов"></div>
+        <p class="field-error" id="loginError" role="alert" hidden></p>
+        <button class="primary-button full-width" id="loginButton" type="submit"><i data-lucide="log-in" aria-hidden="true"></i><span>Войти</span></button>
+      </form>
+
+      <form id="registerForm" class="credential-fields" data-auth-panel="register" hidden>
+        <div class="field-group"><label for="registerNameInput">Имя</label><input id="registerNameInput" type="text" minlength="2" maxlength="80" autocomplete="name" required></div>
+        <div class="field-group"><label for="registerEmailInput">Email</label><input id="registerEmailInput" type="email" maxlength="254" autocomplete="email" required></div>
+        <div class="field-group"><label for="registerPasswordInput">Пароль</label><input id="registerPasswordInput" type="password" minlength="12" maxlength="128" autocomplete="new-password" required placeholder="Не менее 12 символов"></div>
+        <div class="field-group"><label for="inviteCodeInput">Код приглашения</label><input id="inviteCodeInput" type="text" minlength="20" maxlength="100" autocomplete="off" spellcheck="false" required placeholder="invite_…"></div>
+        <p class="field-error" id="registerError" role="alert" hidden></p>
+        <button class="primary-button full-width" id="registerButton" type="submit"><i data-lucide="user-plus" aria-hidden="true"></i><span>Создать аккаунт</span></button>
+      </form>
+
+      <form id="accessForm" class="credential-fields" data-auth-panel="key" hidden>
+        <p class="auth-panel-note">Резервный доступ владельца сервера. Обычным пользователям ключ Secret Manager не нужен.</p>
+        <div class="field-group"><label for="apiKeyInput">Production API key</label><div class="input-with-action"><input id="apiKeyInput" type="password" minlength="24" autocomplete="off" spellcheck="false" placeholder="Значение после API_KEY="><button class="icon-button" id="toggleKeyButton" type="button" aria-label="Показать ключ"><i data-lucide="eye" aria-hidden="true"></i></button></div></div>
+        <p class="field-error" id="accessError" role="alert" hidden></p>
+        <button class="primary-button full-width" id="connectButton" type="submit"><i data-lucide="shield-check" aria-hidden="true"></i><span>Войти как администратор</span></button>
+      </form>
+
+      <section class="account-session" id="accountSession" hidden>
+        <div class="account-identity"><span class="account-avatar" id="accountAvatar">S</span><div><strong id="accountName">—</strong><span id="accountEmail">—</span></div><span class="status-badge" id="accountRole">—</span></div>
+        <div class="invite-tool" id="inviteTool" hidden><label for="inviteRoleInput">Новое приглашение</label><div class="invite-actions"><select id="inviteRoleInput"><option value="member">Участник</option><option value="admin">Администратор</option></select><button class="secondary-button" id="createInviteButton" type="button">Создать</button></div><output id="createdInviteOutput" hidden></output></div>
+        <div class="dialog-actions"><button class="secondary-button" id="closeAccountButton" type="button">Закрыть</button><button class="danger-text-button" id="logoutButton" type="button"><i data-lucide="log-out" aria-hidden="true"></i><span>Выйти</span></button></div>
+      </section>
+
+      <button class="text-button auth-read-only" id="readOnlyButton" type="button">Продолжить без входа</button>
+      <div class="dialog-security"><i data-lucide="lock-keyhole" aria-hidden="true"></i><span>Сессия хранится в защищённой HttpOnly cookie. Пароль никогда не возвращается в браузер.</span></div>
+    </div>
   </dialog>
 
   <dialog class="access-dialog" id="etsyApiDialog" aria-labelledby="etsyApiDialogTitle">

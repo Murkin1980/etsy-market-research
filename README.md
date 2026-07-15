@@ -26,7 +26,7 @@ npm.cmd run playwright:install
 Copy-Item .env.example .env
 ```
 
-The CLI works without an LLM key. Set `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` when using `--use-llm` or the post-run AI analyst in Signal Lab. The default OpenAI model is `gpt-5.6-luna` and can be changed through `OPENAI_MODEL`. Market research requires `ETSY_API_KEY` in `keystring:shared_secret` format. The production web server separately requires a random `API_KEY` of at least 24 characters; 32+ is recommended.
+The CLI works without an LLM key. Set `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` when using `--use-llm` or the post-run AI analyst in Signal Lab. The default OpenAI model is `gpt-5.6-luna` and can be changed through `OPENAI_MODEL`. Market research requires `ETSY_API_KEY` in `keystring:shared_secret` format. The production web server uses invited user accounts; a random `API_KEY` of 32+ characters remains the emergency administrator credential and bootstrap path for the first invitation.
 
 ## Etsy Open API setup
 
@@ -87,7 +87,9 @@ The schema version is recorded in `run-result.json`, metadata, JSON, and CSV exp
 
 The production server includes the **Signal Lab** web panel at `/`. It provides:
 
-- API-key connection stored only in the current browser tab;
+- invite-only accounts with scrypt password hashing, persistent HttpOnly/SameSite sessions, CSRF protection, and admin/member roles;
+- personal workspaces that isolate retained jobs, runs, AI analyses, and report downloads by server-enforced ownership;
+- emergency administrator API-key access stored only in the current browser tab;
 - Etsy Open API credential setup with live verification and encrypted persistent storage;
 - validated research-job creation with conservative defaults;
 - live queue/job status and clear blocked/failed states;
@@ -117,6 +119,11 @@ curl -X POST http://127.0.0.1:3000/jobs \
 | --- | --- | --- |
 | `GET /` | public | Signal Lab web panel |
 | `GET /health` | public | Health and queue capacity |
+| `POST /auth/login` | public | Start a protected account session |
+| `POST /auth/register` | invite | Create an account from a one-time invitation |
+| `GET /auth/me` | cookie/key | Restore the current session and rotate its CSRF token |
+| `POST /auth/logout` | session | Revoke the current session |
+| `POST /admin/invites` | admin | Create a one-time member/admin invitation |
 | `GET /jobs` | bearer | Retained jobs |
 | `POST /jobs` | bearer | Validate and queue research |
 | `GET /jobs/:id` | bearer | Job state and structured result |
@@ -128,12 +135,12 @@ curl -X POST http://127.0.0.1:3000/jobs \
 | `GET /runs/:id/ai-analysis` | bearer | Read a saved AI market analysis or its readiness state |
 | `POST /runs/:id/ai-analysis` | bearer | Generate or refresh an AI analysis from a completed report |
 
-The API validates body size and fields, limits requests by client IP, caps the job queue, bounds child-process output, and shuts down active workers on `SIGTERM`/`SIGINT`. Etsy credentials saved through Signal Lab are verified before persistence, encrypted with AES-256-GCM using a key derived from the production `API_KEY`, and never returned to the browser. Rotating `API_KEY` requires entering the Etsy credential again. Configure `TRUST_PROXY=true` only behind a trusted proxy that replaces `X-Forwarded-For`.
+The API validates body size and fields, limits requests by client IP, caps the job queue, bounds child-process output, and shuts down active workers on `SIGTERM`/`SIGINT`. Account and ownership records are atomically persisted under the existing `data/` volume with mode `0600`; passwords use salted scrypt hashes and raw session/invitation tokens are never stored. Existing unowned production reports are visible only to administrators. Etsy credentials saved through Signal Lab are verified before persistence, encrypted with AES-256-GCM using a key derived from the production `API_KEY`, and never returned to the browser. Rotating `API_KEY` requires entering the Etsy credential again. Configure `TRUST_PROXY=true` only behind a trusted proxy that replaces `X-Forwarded-For`.
 
 ## Quality gates
 
 ```bash
-npm run check       # typecheck + lint + 97 tests + build
+npm run check       # typecheck + lint + 102 tests + build
 npm run smoke:api   # health, auth, and validation smoke test
 npm run smoke:ai    # one safe live structured-output request (uses API credits)
 npm audit --audit-level=high
@@ -180,6 +187,7 @@ curl http://127.0.0.1:3000/health
 | `SCRAPER_DELAY_MIN_MS` / `MAX` | `2500` / `6000` |
 | `API_KEY` | Random 32+ character secret |
 | `REQUIRE_API_KEY` | `true` |
+| `SESSION_TTL_DAYS` | `7` |
 | `MAX_CONCURRENT_JOBS` | `2` |
 | `MAX_QUEUED_JOBS` | `50` |
 | `SERVER_HOST` | `0.0.0.0` inside Docker |

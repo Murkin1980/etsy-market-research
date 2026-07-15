@@ -10,6 +10,9 @@
 
   const state = {
     apiKey: sessionStorage.getItem(API_KEY_STORAGE) || '',
+    csrfToken: '',
+    user: null,
+    authType: '',
     health: null,
     jobs: [],
     runs: [],
@@ -32,12 +35,38 @@
     refreshButton: $('refreshButton'),
     accessButton: $('accessButton'),
     accessDialog: $('accessDialog'),
+    authTabs: $('authTabs'),
+    accessLead: $('accessLead'),
+    loginForm: $('loginForm'),
+    loginEmailInput: $('loginEmailInput'),
+    loginPasswordInput: $('loginPasswordInput'),
+    loginError: $('loginError'),
+    loginButton: $('loginButton'),
+    registerForm: $('registerForm'),
+    registerNameInput: $('registerNameInput'),
+    registerEmailInput: $('registerEmailInput'),
+    registerPasswordInput: $('registerPasswordInput'),
+    inviteCodeInput: $('inviteCodeInput'),
+    registerError: $('registerError'),
+    registerButton: $('registerButton'),
     accessForm: $('accessForm'),
     apiKeyInput: $('apiKeyInput'),
     accessError: $('accessError'),
     toggleKeyButton: $('toggleKeyButton'),
     readOnlyButton: $('readOnlyButton'),
     connectButton: $('connectButton'),
+    accountButtonText: $('accountButtonText'),
+    accountSession: $('accountSession'),
+    accountAvatar: $('accountAvatar'),
+    accountName: $('accountName'),
+    accountEmail: $('accountEmail'),
+    accountRole: $('accountRole'),
+    inviteTool: $('inviteTool'),
+    inviteRoleInput: $('inviteRoleInput'),
+    createInviteButton: $('createInviteButton'),
+    createdInviteOutput: $('createdInviteOutput'),
+    closeAccountButton: $('closeAccountButton'),
+    logoutButton: $('logoutButton'),
     researchForm: $('researchForm'),
     queryInput: $('queryInput'),
     queryError: $('queryError'),
@@ -187,13 +216,24 @@
     return String(runDir).split(/[\\/]/).filter(Boolean).pop() || '';
   }
 
+  function hasAccess() {
+    return Boolean(state.user || state.apiKey);
+  }
+
+  function isAdmin() {
+    return state.user?.role === 'admin' || state.authType === 'api-key';
+  }
+
   async function api(path, options = {}) {
     const headers = new Headers(options.headers || {});
     const apiKey = options.apiKeyOverride !== undefined ? options.apiKeyOverride : state.apiKey;
     if (apiKey) headers.set('Authorization', `Bearer ${apiKey}`);
     if (options.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
+    if (state.csrfToken && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(String(options.method || 'GET').toUpperCase())) {
+      headers.set('X-CSRF-Token', state.csrfToken);
+    }
 
-    const response = await fetch(path, { ...options, headers });
+    const response = await fetch(path, { credentials: 'same-origin', ...options, headers });
     const contentType = response.headers.get('content-type') || '';
     const payload = contentType.includes('application/json') ? await response.json() : await response.text();
     if (!response.ok) {
@@ -232,7 +272,7 @@
     elements.pageEyebrow.textContent = viewMeta[viewName][0];
     elements.pageTitle.textContent = viewMeta[viewName][1];
     window.scrollTo({ top: 0, behavior: 'smooth' });
-    if (viewName === 'runs' && state.apiKey) void refreshProtectedData();
+    if (viewName === 'runs' && hasAccess()) void refreshProtectedData();
   }
 
   function updateConnectionUi(online, message) {
@@ -243,7 +283,7 @@
       item.classList.toggle('is-error', !online);
     });
     liveText.textContent = message;
-    elements.sidebarStatusText.textContent = online ? (state.apiKey ? 'API подключён' : 'Сервер доступен') : 'Сервер недоступен';
+    elements.sidebarStatusText.textContent = online ? (hasAccess() ? 'Рабочее пространство подключено' : 'Сервер доступен') : 'Сервер недоступен';
   }
 
   function canLaunchResearch() {
@@ -325,7 +365,7 @@
   }
 
   async function refreshProtectedData() {
-    if (!state.apiKey) {
+    if (!hasAccess()) {
       renderOverviewJobs();
       renderRunsList();
       return;
@@ -347,8 +387,8 @@
       }
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
-        clearApiKey(false);
-        openAccessDialog('Срок действия ключа истёк или ключ неверный.');
+        clearAccess(false);
+        openAccessDialog('Сессия завершена. Войдите снова.');
       } else {
         showToast('Не удалось обновить данные', error.message, 'error');
       }
@@ -603,7 +643,7 @@
     elements.aiAnalysisContent.replaceChildren();
     elements.analyzeReportButton.disabled = true;
     setAiAnalysisState('empty');
-    if (!runId || !state.apiKey) return;
+    if (!runId || !hasAccess()) return;
     try {
       const payload = await api(`/runs/${encodeURIComponent(runId)}/ai-analysis`);
       renderAiAnalysis(payload);
@@ -632,7 +672,7 @@
   async function loadRunFiles(runId) {
     elements.runFiles.replaceChildren();
     elements.filesEmpty.hidden = false;
-    if (!runId || !state.apiKey) return;
+    if (!runId || !hasAccess()) return;
     try {
       const payload = await api(`/runs/${encodeURIComponent(runId)}/files`);
       const files = Array.isArray(payload.files) ? payload.files : [];
@@ -661,7 +701,8 @@
 
   async function downloadRunFile(file) {
     try {
-      const response = await fetch(file.downloadPath, { headers: { Authorization: `Bearer ${state.apiKey}` } });
+      const headers = state.apiKey ? { Authorization: `Bearer ${state.apiKey}` } : {};
+      const response = await fetch(file.downloadPath, { credentials: 'same-origin', headers });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const blob = await response.blob();
       const objectUrl = URL.createObjectURL(blob);
@@ -721,11 +762,11 @@
     if (state.pollTimer) window.clearInterval(state.pollTimer);
     if (!state.currentJobId) return;
     void pollCurrentJob();
-    state.pollTimer = window.setInterval(() => void pollCurrentJob(), 4000);
+    state.pollTimer = window.setInterval(() => void pollCurrentJob(), 10000);
   }
 
   async function pollCurrentJob() {
-    if (!state.currentJobId || !state.apiKey) return;
+    if (!state.currentJobId || !hasAccess()) return;
     try {
       const job = await api(`/jobs/${encodeURIComponent(state.currentJobId)}`);
       updateCurrentJob(job);
@@ -751,8 +792,8 @@
       elements.queryInput.focus();
       return;
     }
-    if (!state.apiKey) {
-      openAccessDialog('Подключите API-ключ перед запуском исследования.');
+    if (!hasAccess()) {
+      openAccessDialog('Войдите в аккаунт перед запуском исследования.');
       return;
     }
 
@@ -776,7 +817,7 @@
       startPolling();
       showToast('Исследование принято', created.queuePosition ? `Позиция в очереди: ${created.queuePosition}` : 'Запуск начался.');
     } catch (error) {
-      if (error instanceof ApiError && error.status === 401) openAccessDialog('API-ключ не принят сервером.');
+      if (error instanceof ApiError && error.status === 401) openAccessDialog('Сессия завершена. Войдите снова.');
       else showToast('Не удалось запустить исследование', error.message, 'error');
     } finally {
       elements.submitResearchButton.disabled = !canLaunchResearch();
@@ -784,8 +825,12 @@
   }
 
   function openEtsyApiDialog() {
-    if (!state.apiKey) {
-      openAccessDialog('Сначала подключите Production API key для изменения настроек.');
+    if (!hasAccess()) {
+      openAccessDialog('Сначала войдите в аккаунт.');
+      return;
+    }
+    if (!isAdmin()) {
+      showToast('Недостаточно прав', 'Настройки Etsy API доступны только администратору.', 'error');
       return;
     }
     elements.etsyApiError.hidden = true;
@@ -820,7 +865,7 @@
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
         elements.etsyApiDialog.close();
-        openAccessDialog('Production API key больше не действителен.');
+        openAccessDialog('Сессия завершена. Войдите снова.');
       } else {
         elements.etsyApiError.textContent = error.message;
         elements.etsyApiError.hidden = false;
@@ -831,16 +876,57 @@
   }
 
   function openAccessDialog(message = '') {
-    elements.accessError.hidden = !message;
-    elements.accessError.textContent = message;
-    elements.apiKeyInput.value = state.apiKey;
-    elements.readOnlyButton.textContent = state.apiKey ? 'Отключить ключ' : 'Только статус';
+    renderAccountState();
+    if (message) {
+      setAuthMode('login');
+      elements.loginError.textContent = message;
+      elements.loginError.hidden = false;
+    }
     if (!elements.accessDialog.open) elements.accessDialog.showModal();
-    window.setTimeout(() => elements.apiKeyInput.focus(), 50);
+    window.setTimeout(() => (hasAccess() ? elements.closeAccountButton : elements.loginEmailInput).focus(), 50);
   }
 
-  function clearApiKey(showMessage = true) {
+  function setAuthMode(mode) {
+    document.querySelectorAll('[data-auth-panel]').forEach((panel) => { panel.hidden = panel.dataset.authPanel !== mode; });
+    document.querySelectorAll('[data-auth-mode]').forEach((button) => {
+      const active = button.dataset.authMode === mode;
+      button.classList.toggle('is-active', active);
+      button.setAttribute('aria-selected', String(active));
+    });
+  }
+
+  function renderAccountState() {
+    const authenticated = hasAccess();
+    elements.authTabs.hidden = authenticated;
+    elements.accessLead.hidden = authenticated;
+    elements.readOnlyButton.hidden = authenticated;
+    document.querySelectorAll('[data-auth-panel]').forEach((panel) => { panel.hidden = authenticated || panel.dataset.authPanel !== 'login'; });
+    elements.accountSession.hidden = !authenticated;
+    elements.accountButtonText.textContent = authenticated ? (state.user?.name || 'Администратор') : 'Войти';
+    elements.etsyApiSettingsButton.hidden = authenticated && !isAdmin();
+    if (!authenticated) return;
+    const user = state.user || { name: 'Production administrator', email: 'admin@local', role: 'admin' };
+    elements.accountName.textContent = user.name;
+    elements.accountEmail.textContent = user.email;
+    elements.accountAvatar.textContent = user.name.trim().charAt(0).toUpperCase() || 'S';
+    elements.accountRole.textContent = user.role === 'admin' ? 'Администратор' : 'Участник';
+    elements.inviteTool.hidden = !isAdmin();
+    elements.createdInviteOutput.hidden = true;
+    elements.sidebarStatusText.textContent = 'Персональное пространство';
+  }
+
+  function applyAuthPayload(payload) {
+    state.user = payload.user || null;
+    state.authType = payload.authType || '';
+    state.csrfToken = payload.csrfToken || '';
+    renderAccountState();
+  }
+
+  function clearAccess(showMessage = true) {
     state.apiKey = '';
+    state.user = null;
+    state.authType = '';
+    state.csrfToken = '';
     sessionStorage.removeItem(API_KEY_STORAGE);
     state.jobs = [];
     state.runs = [];
@@ -849,7 +935,99 @@
     renderOverviewJobs();
     renderRunsList();
     updateConnectionUi(Boolean(state.health), state.health ? 'Production онлайн' : 'Нет соединения');
-    if (showMessage) showToast('API-ключ отключён', 'Панель оставлена в режиме просмотра статуса.');
+    renderAccountState();
+    if (showMessage) showToast('Вы вышли', 'Персональные данные скрыты до следующего входа.');
+  }
+
+  async function loginAccount(event) {
+    event.preventDefault();
+    elements.loginButton.disabled = true;
+    elements.loginError.hidden = true;
+    try {
+      const payload = await api('/auth/login', {
+        method: 'POST', apiKeyOverride: '',
+        body: JSON.stringify({ email: elements.loginEmailInput.value.trim(), password: elements.loginPasswordInput.value }),
+      });
+      state.apiKey = '';
+      sessionStorage.removeItem(API_KEY_STORAGE);
+      applyAuthPayload(payload);
+      elements.loginPasswordInput.value = '';
+      elements.accessDialog.close();
+      showToast('Вход выполнен', 'Открыто ваше персональное рабочее пространство.');
+      await refreshProtectedData();
+    } catch (error) {
+      elements.loginError.textContent = error.message;
+      elements.loginError.hidden = false;
+    } finally {
+      elements.loginButton.disabled = false;
+    }
+  }
+
+  async function registerAccount(event) {
+    event.preventDefault();
+    elements.registerButton.disabled = true;
+    elements.registerError.hidden = true;
+    try {
+      const payload = await api('/auth/register', {
+        method: 'POST', apiKeyOverride: '',
+        body: JSON.stringify({
+          name: elements.registerNameInput.value.trim(), email: elements.registerEmailInput.value.trim(),
+          password: elements.registerPasswordInput.value, inviteCode: elements.inviteCodeInput.value.trim(),
+        }),
+      });
+      applyAuthPayload(payload);
+      elements.registerPasswordInput.value = '';
+      elements.inviteCodeInput.value = '';
+      elements.accessDialog.close();
+      showToast('Аккаунт создан', 'Ваше персональное рабочее пространство готово.');
+      await refreshProtectedData();
+    } catch (error) {
+      elements.registerError.textContent = error.message;
+      elements.registerError.hidden = false;
+    } finally {
+      elements.registerButton.disabled = false;
+    }
+  }
+
+  async function logoutAccount() {
+    try {
+      if (state.authType === 'session') await api('/auth/logout', { method: 'POST', body: '{}' });
+    } catch {
+      // Local state is cleared even when the server session already expired.
+    }
+    clearAccess();
+    elements.accessDialog.close();
+  }
+
+  async function createInvite() {
+    elements.createInviteButton.disabled = true;
+    try {
+      const invite = await api('/admin/invites', {
+        method: 'POST', body: JSON.stringify({ role: elements.inviteRoleInput.value }),
+      });
+      elements.createdInviteOutput.textContent = invite.code;
+      elements.createdInviteOutput.hidden = false;
+      showToast('Приглашение создано', 'Передайте код нужному пользователю по защищённому каналу.');
+    } catch (error) {
+      showToast('Не удалось создать приглашение', error.message, 'error');
+    } finally {
+      elements.createInviteButton.disabled = false;
+    }
+  }
+
+  async function restoreAccess() {
+    try {
+      const payload = await api('/auth/me');
+      if (!payload.authenticated) {
+        clearAccess(false);
+        return false;
+      }
+      applyAuthPayload(payload);
+      return true;
+    } catch {
+      clearAccess(false);
+      return false;
+    }
   }
 
   async function connectAccess(event) {
@@ -866,8 +1044,10 @@
       await api('/jobs', { apiKeyOverride: candidate });
       state.apiKey = candidate;
       sessionStorage.setItem(API_KEY_STORAGE, candidate);
+      const authPayload = await api('/auth/me', { apiKeyOverride: candidate });
+      applyAuthPayload(authPayload);
       elements.accessDialog.close();
-      updateConnectionUi(true, 'API подключён');
+      updateConnectionUi(true, 'Администратор подключён');
       showToast('Доступ подтверждён', 'Можно запускать исследования и скачивать отчёты.');
       await refreshProtectedData();
     } catch (error) {
@@ -900,7 +1080,13 @@
     });
     elements.refreshButton.addEventListener('click', () => void refreshAll());
     elements.accessButton.addEventListener('click', () => openAccessDialog());
+    document.querySelectorAll('[data-auth-mode]').forEach((button) => button.addEventListener('click', () => setAuthMode(button.dataset.authMode)));
+    elements.loginForm.addEventListener('submit', loginAccount);
+    elements.registerForm.addEventListener('submit', registerAccount);
     elements.accessForm.addEventListener('submit', connectAccess);
+    elements.logoutButton.addEventListener('click', () => void logoutAccount());
+    elements.closeAccountButton.addEventListener('click', () => elements.accessDialog.close());
+    elements.createInviteButton.addEventListener('click', () => void createInvite());
     elements.toggleKeyButton.addEventListener('click', () => {
       const showing = elements.apiKeyInput.type === 'text';
       elements.apiKeyInput.type = showing ? 'password' : 'text';
@@ -910,7 +1096,6 @@
       refreshIcons();
     });
     elements.readOnlyButton.addEventListener('click', () => {
-      if (state.apiKey) clearApiKey();
       elements.accessDialog.close();
     });
     document.querySelectorAll('[data-run-mode]').forEach((button) => button.addEventListener('click', () => {
@@ -936,7 +1121,8 @@
     setupEvents();
     updateResearchSummary();
     await refreshHealth();
-    if (state.apiKey) await refreshProtectedData();
+    const restored = await restoreAccess();
+    if (restored) await refreshProtectedData();
     else window.setTimeout(() => openAccessDialog(), 250);
     window.setInterval(() => void refreshHealth(), 30000);
   }
