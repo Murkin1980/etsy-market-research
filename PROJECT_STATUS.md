@@ -147,6 +147,7 @@ Status: **Completed**
 - [x] Add authenticated `GET` and `POST /runs/:id/ai-analysis` endpoints with traversal protection and duplicate-run guards.
 - [x] Add a responsive Russian-language AI report: product concept, audience, price, package, image plan, market gaps, features, competitors, risks, and refresh action.
 - [x] Save each result as the allowlisted `market-analysis.json` report file.
+- [x] Enrich AI competitors with verified source links to their Etsy shops and listing cards without treating shop-wide sales as listing sales.
 - [x] Pass typecheck, lint, 97/97 tests, build, live structured-output smoke, desktop/mobile visual checks, and a zero-error browser-console check.
 
 Release verification:

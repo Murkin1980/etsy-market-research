@@ -2,8 +2,9 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { getRunAiAnalysis, loadRunListings, RunReportError } from '../src/analysis/run-report-analyzer.js';
+import { buildTopShopLinks, getRunAiAnalysis, loadRunListings, RunReportError } from '../src/analysis/run-report-analyzer.js';
 import { summarizeReport } from '../src/analysis/report-summary.js';
+import type { LlmAnalysisResult } from '../src/types/schemas.js';
 import { createMockListing } from './helpers/listing-fixture.js';
 
 const temporaryDirectories: string[] = [];
@@ -87,5 +88,51 @@ describe('completed run AI analysis access', () => {
     expect(() => loadRunListings(runsDir, '../secret')).toThrow(RunReportError);
     fs.mkdirSync(path.join(runsDir, 'empty-run'), { recursive: true });
     expect(() => loadRunListings(runsDir, 'empty-run')).toThrow(/no completed listings report/);
+  });
+
+  it('builds unique Etsy shop and listing links only from verified source listings', () => {
+    const listings = [
+      createMockListing({ listingId: '1', shopName: 'StrongShop', rating: { ...createMockListing().rating, shopSales: 1250 } }),
+      createMockListing({ listingId: '2', shopName: 'UnsafeShop', shopUrl: 'https://example.com/shop' }),
+    ];
+    const product = (listingId: string, rank: number) => ({
+      rank,
+      listingId,
+      title: `Product ${listingId}`,
+      url: `https://www.etsy.com/listing/${listingId}`,
+      mainUSP: 'Clear outcome',
+      targetAudience: ['Small business'],
+      strengths: ['Complete'],
+      weaknesses: ['Generic'],
+      demandReasons: ['Observed feature coverage'],
+      improvementOpportunities: ['Narrow positioning'],
+    });
+    const analysis = {
+      marketSummary: {
+        analyzedListings: 2,
+        averagePriceUsd: 10,
+        medianPriceUsd: 10,
+        commonFeatures: [],
+        commonPositioningPatterns: [],
+        marketGaps: [],
+      },
+      topProducts: [product('1', 1), product('1', 2), product('2', 3)],
+      recommendedFeatures: [],
+      newProductConcept: {
+        name: 'Concept', positioning: 'Positioning', mainUSP: 'USP', targetAudience: [],
+        recommendedPriceMinUsd: 10, recommendedPriceMaxUsd: 20, includedItems: [], bonuses: [],
+        imagePlan: [], descriptionPlan: [],
+      },
+      risks: [],
+    } satisfies LlmAnalysisResult;
+
+    expect(buildTopShopLinks(listings, analysis)).toEqual([{
+      shopName: 'StrongShop',
+      shopUrl: 'https://www.etsy.com/shop/TestShop',
+      listingId: '1',
+      listingTitle: 'Test Listing',
+      listingUrl: 'https://www.etsy.com/listing/123',
+      shopSalesSignal: 1250,
+    }]);
   });
 });

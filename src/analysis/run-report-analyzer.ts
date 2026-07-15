@@ -24,6 +24,53 @@ export interface RunAiAnalysisPayload {
   model: string;
   summary: ReportSummary;
   analysis: LlmAnalysisResult | null;
+  topShopLinks: TopShopLink[];
+}
+
+export interface TopShopLink {
+  shopName: string;
+  shopUrl: string;
+  listingId: string;
+  listingTitle: string;
+  listingUrl: string;
+  shopSalesSignal: number | null;
+}
+
+function safeEtsyUrl(value: string | null): string | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    const hostname = url.hostname.toLowerCase();
+    if (url.protocol !== 'https:' || (hostname !== 'etsy.com' && !hostname.endsWith('.etsy.com'))) return null;
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+export function buildTopShopLinks(listings: EtsyListing[], analysis: LlmAnalysisResult | null): TopShopLink[] {
+  if (!analysis) return [];
+  const listingsById = new Map(
+    listings.filter((listing) => listing.listingId).map((listing) => [listing.listingId as string, listing]),
+  );
+  const seenShops = new Set<string>();
+  const links: TopShopLink[] = [];
+  for (const product of analysis.topProducts) {
+    const listing = listingsById.get(product.listingId);
+    const shopUrl = safeEtsyUrl(listing?.shopUrl ?? null);
+    const listingUrl = safeEtsyUrl(listing?.canonicalUrl ?? listing?.url ?? null);
+    if (!listing || !shopUrl || !listingUrl || seenShops.has(shopUrl)) continue;
+    seenShops.add(shopUrl);
+    links.push({
+      shopName: listing.shopName || 'Etsy shop',
+      shopUrl,
+      listingId: product.listingId,
+      listingTitle: listing.title || product.title,
+      listingUrl,
+      shopSalesSignal: listing.rating.shopSales,
+    });
+  }
+  return links;
 }
 
 function resolveRunRoot(runsDir: string, runId: string): string {
@@ -79,6 +126,7 @@ export function getRunAiAnalysis(
     model,
     summary: summarizeReport(listings),
     analysis,
+    topShopLinks: buildTopShopLinks(listings, analysis),
   };
 }
 
@@ -119,5 +167,6 @@ export async function createRunAiAnalysis(options: {
     model: options.model,
     summary: summarizeReport(listings),
     analysis,
+    topShopLinks: buildTopShopLinks(listings, analysis),
   };
 }
