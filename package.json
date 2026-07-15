@@ -1,6 +1,6 @@
 {
   "name": "etsy-market-research",
-  "version": "1.7.0",
+  "version": "1.7.1",
   "description": "Automated market research tool for digital products on Etsy",
   "type": "module",
   "main": "dist/index.js",

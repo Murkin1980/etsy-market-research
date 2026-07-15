@@ -45,7 +45,7 @@
             <i data-lucide="circle-user-round" aria-hidden="true"></i><span id="accountButtonText">Войти</span>
           </button>
         </div>
-        <p class="version-label">Production · v1.7.0</p>
+        <p class="version-label">Production · v1.7.1</p>
       </div>
     </aside>
 
@@ -252,9 +252,17 @@
             <div id="detailContent" hidden>
               <div class="detail-head"><div><p class="eyebrow">Результат</p><h2 id="detailQuery">—</h2></div><span class="status-badge" id="detailStatus">—</span></div>
               <p class="detail-error" id="detailError" hidden></p>
-              <div class="result-metrics"><div><span>Найдено</span><strong id="detailFound">—</strong></div><div><span>Успешно</span><strong id="detailSuccess">—</strong></div><div><span>Частично</span><strong id="detailPartial">—</strong></div><div><span>Блокировки</span><strong id="detailBlocked">—</strong></div></div>
-              <dl class="detail-facts"><div><dt>Средняя цена</dt><dd id="detailAverage">—</dd></div><div><dt>Медианная цена</dt><dd id="detailMedian">—</dd></div><div><dt>Длительность</dt><dd id="detailDuration">—</dd></div><div><dt>Завершено</dt><dd id="detailCompleted">—</dd></div></dl>
-              <section class="ai-report-section" id="aiReportSection" aria-labelledby="aiReportTitle">
+              <div class="report-tabs" role="tablist" aria-label="Разделы отчёта">
+                <button class="is-active" type="button" role="tab" aria-selected="true" data-report-tab="summary"><i data-lucide="layout-dashboard" aria-hidden="true"></i><span>Сводка</span></button>
+                <button type="button" role="tab" aria-selected="false" data-report-tab="ai"><i data-lucide="sparkles" aria-hidden="true"></i><span>AI-решение</span></button>
+                <button type="button" role="tab" aria-selected="false" data-report-tab="files"><i data-lucide="files" aria-hidden="true"></i><span>Файлы отчёта</span></button>
+              </div>
+              <section class="report-panel" data-report-panel="summary">
+                <div class="result-metrics"><div><span>Найдено</span><strong id="detailFound">—</strong></div><div><span>Успешно</span><strong id="detailSuccess">—</strong></div><div><span>Частично</span><strong id="detailPartial">—</strong></div><div><span>Блокировки</span><strong id="detailBlocked">—</strong></div></div>
+                <dl class="detail-facts"><div><dt>Средняя цена</dt><dd id="detailAverage">—</dd></div><div><dt>Медианная цена</dt><dd id="detailMedian">—</dd></div><div><dt>Длительность</dt><dd id="detailDuration">—</dd></div><div><dt>Завершено</dt><dd id="detailCompleted">—</dd></div></dl>
+                <div class="readability-note"><i data-lucide="info" aria-hidden="true"></i><p><strong>Как читать результат.</strong> Цены и количество — расчёты по собранной выборке. Для продуктового решения откройте вкладку «AI-решение».</p></div>
+              </section>
+              <section class="ai-report-section report-panel" id="aiReportSection" data-report-panel="ai" aria-labelledby="aiReportTitle" hidden>
                 <div class="section-heading ai-report-heading">
                   <div><p class="eyebrow">Решение</p><h3 id="aiReportTitle">AI-анализ отчёта</h3></div>
                   <span class="ai-status" id="aiAnalysisStatus">Не создан</span>
@@ -270,7 +278,7 @@
                 <p class="detail-error" id="aiAnalysisError" hidden></p>
                 <div class="ai-analysis-content" id="aiAnalysisContent" hidden></div>
               </section>
-              <div class="files-section"><div class="section-heading"><div><p class="eyebrow">Экспорт</p><h3>Файлы отчёта</h3></div></div><div id="runFiles" class="file-list"></div><p class="files-empty" id="filesEmpty" hidden>Файлы появятся после завершения сбора.</p></div>
+              <section class="files-section report-panel" data-report-panel="files" hidden><div class="section-heading"><div><p class="eyebrow">Экспорт</p><h3>Файлы отчёта</h3></div></div><p class="files-intro">Откройте или скачайте исходные данные исследования. Название и размер каждого файла показаны крупно.</p><div id="runFiles" class="file-list"></div><p class="files-empty" id="filesEmpty" hidden>Файлы появятся после завершения сбора.</p></section>
             </div>
           </aside>
         </div>
