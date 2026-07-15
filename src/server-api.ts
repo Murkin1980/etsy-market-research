@@ -35,6 +35,12 @@ export const EtsyApiSettingsSchema = z.object({
 
 export type EtsyApiSettings = z.infer<typeof EtsyApiSettingsSchema>;
 
+export const AiAnalysisRequestSchema = z.object({
+  force: z.boolean().default(false),
+}).strict();
+
+export type AiAnalysisRequest = z.infer<typeof AiAnalysisRequestSchema>;
+
 export interface RunResultPayload {
   status: 'completed' | 'failed';
   query: string;
@@ -88,6 +94,14 @@ export function parseEtsyApiSettings(input: unknown): EtsyApiSettings {
   const parsed = EtsyApiSettingsSchema.safeParse(input);
   if (!parsed.success) {
     throw new RequestBodyError('Invalid Etsy API settings', 400, parsed.error.flatten());
+  }
+  return parsed.data;
+}
+
+export function parseAiAnalysisRequest(input: unknown): AiAnalysisRequest {
+  const parsed = AiAnalysisRequestSchema.safeParse(input);
+  if (!parsed.success) {
+    throw new RequestBodyError('Invalid AI analysis request', 400, parsed.error.flatten());
   }
   return parsed.data;
 }

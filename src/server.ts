@@ -7,6 +7,7 @@ import {
   buildCliParams,
   getClientIp,
   parseJsonBody,
+  parseAiAnalysisRequest,
   parseEtsyApiSettings,
   parseResearchJobRequest,
   parseRunResultOutput,
@@ -24,6 +25,11 @@ import { resolveUiAsset } from './server-ui.js';
 import { closeLogStreams, createChildLogger } from './utils/logger.js';
 import { EtsyApiClient, EtsyApiError } from './etsy-api/client.js';
 import { EncryptedCredentialStore } from './storage/encrypted-credential.js';
+import {
+  createRunAiAnalysis,
+  getRunAiAnalysis,
+  RunReportError,
+} from './analysis/run-report-analyzer.js';
 
 const log = createChildLogger('server');
 
@@ -31,8 +37,9 @@ const rateLimitMap = new Map<string, number[]>();
 const RATE_WINDOW_MS = 60_000;
 const MAX_CHILD_OUTPUT_BYTES = 1_000_000;
 const MIN_PRODUCTION_API_KEY_LENGTH = 24;
-const APP_VERSION = '1.3.0';
+const APP_VERSION = '1.4.0';
 const activeChildren = new Set<ReturnType<typeof spawn>>();
+const activeAiAnalyses = new Set<string>();
 let rateLimitChecks = 0;
 let runtimeEtsyApiKey = config.etsyApiKey;
 let etsyApiStatus: 'missing' | 'checking' | 'verified' | 'invalid' = runtimeEtsyApiKey
@@ -262,6 +269,8 @@ const server = http.createServer(async (req, res) => {
       dataSource: config.etsyDataSource === 'api' ? 'etsy-api' : 'browser-scraper',
       etsyApiConfigured: Boolean(runtimeEtsyApiKey),
       etsyApiStatus,
+      aiAnalysisConfigured: Boolean(config.openaiApiKey),
+      aiAnalysisModel: config.openaiModel,
     });
     return;
   }
@@ -382,6 +391,58 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  const runAiAnalysisMatch = url.pathname.match(/^\/runs\/([^/]+)\/ai-analysis$/);
+  if (runAiAnalysisMatch && (req.method === 'GET' || req.method === 'POST')) {
+    const runId = decodePathSegment(runAiAnalysisMatch[1]);
+    if (!runId) {
+      sendJson(res, 400, { error: 'Invalid run identifier' });
+      return;
+    }
+    try {
+      if (req.method === 'GET') {
+        sendJson(res, 200, getRunAiAnalysis(
+          config.paths.runs,
+          runId,
+          Boolean(config.openaiApiKey),
+          config.openaiModel,
+        ));
+        return;
+      }
+
+      const request = parseAiAnalysisRequest(
+        await parseJsonBody(req, config.server.maxRequestBodyBytes),
+      );
+      if (activeAiAnalyses.has(runId)) {
+        sendJson(res, 409, { error: 'AI analysis is already running for this report' });
+        return;
+      }
+      activeAiAnalyses.add(runId);
+      try {
+        const payload = await createRunAiAnalysis({
+          runsDir: config.paths.runs,
+          runId,
+          apiKey: config.openaiApiKey,
+          model: config.openaiModel,
+          timeoutMs: config.llmTimeoutMs,
+          force: request.force,
+        });
+        sendJson(res, request.force ? 200 : 201, payload);
+      } finally {
+        activeAiAnalyses.delete(runId);
+      }
+    } catch (error) {
+      if (error instanceof RequestBodyError) {
+        sendJson(res, error.statusCode, { error: error.message, details: error.details });
+      } else if (error instanceof RunReportError) {
+        sendJson(res, error.statusCode, { error: error.message });
+      } else {
+        log.error({ runId, error: (error as Error).message }, 'AI report analysis failed');
+        sendJson(res, 500, { error: 'AI report analysis failed' });
+      }
+    }
+    return;
+  }
+
   const runFilesMatch = url.pathname.match(/^\/runs\/([^/]+)\/files$/);
   if (runFilesMatch && req.method === 'GET') {
     const runId = decodePathSegment(runFilesMatch[1]);
@@ -434,6 +495,8 @@ server.listen(port, config.server.host, () => {
   console.log('  POST /jobs             - Create a validated research job');
   console.log('  GET  /jobs/:id         - Job status');
   console.log('  GET  /runs             - List completed runs');
+  console.log('  GET  /runs/:id/ai-analysis - Read report analysis');
+  console.log('  POST /runs/:id/ai-analysis - Analyze a completed report');
   console.log('  PUT  /settings/etsy-api - Verify and save Etsy API credentials');
   if (config.server.apiKey) console.log('  Auth: Authorization: Bearer <API_KEY>');
 

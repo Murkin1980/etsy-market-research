@@ -40,10 +40,15 @@ describe('run report downloads', () => {
     fs.mkdirSync(reportDir, { recursive: true });
     fs.writeFileSync(path.join(runsDir, runId, 'run-result.json'), '{}');
     fs.writeFileSync(path.join(reportDir, 'listings-summary.csv'), 'title,price');
+    fs.writeFileSync(path.join(reportDir, 'market-analysis.json'), '{}');
     fs.writeFileSync(path.join(reportDir, 'private.txt'), 'not exposed');
 
     const files = listRunFiles(runsDir, runId);
-    expect(files?.map((file) => file.name)).toEqual(['run-result.json', 'listings-summary.csv']);
+    expect(files?.map((file) => file.name)).toEqual([
+      'run-result.json',
+      'listings-summary.csv',
+      'market-analysis.json',
+    ]);
     expect(resolveRunFile(runsDir, runId, 'listings-summary.csv')?.filePath).toBe(path.join(reportDir, 'listings-summary.csv'));
     expect(resolveRunFile(runsDir, runId, 'private.txt')).toBeNull();
   });

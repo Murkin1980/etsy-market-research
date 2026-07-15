@@ -15,6 +15,7 @@
     runs: [],
     runMode: 'jobs',
     selectedId: '',
+    selectedRunId: '',
     currentJobId: '',
     pollTimer: null,
     currentView: 'overview',
@@ -98,6 +99,12 @@
     detailMedian: $('detailMedian'),
     detailDuration: $('detailDuration'),
     detailCompleted: $('detailCompleted'),
+    aiAnalysisStatus: $('aiAnalysisStatus'),
+    aiAnalysisEmpty: $('aiAnalysisEmpty'),
+    aiAnalysisLoading: $('aiAnalysisLoading'),
+    aiAnalysisError: $('aiAnalysisError'),
+    aiAnalysisContent: $('aiAnalysisContent'),
+    analyzeReportButton: $('analyzeReportButton'),
     runFiles: $('runFiles'),
     filesEmpty: $('filesEmpty'),
     toastRegion: $('toastRegion'),
@@ -399,6 +406,7 @@
 
   async function selectEntry(entry) {
     state.selectedId = entry.id;
+    state.selectedRunId = entry.runId || '';
     renderRunsList();
     elements.detailEmpty.hidden = true;
     elements.detailContent.hidden = false;
@@ -416,7 +424,172 @@
     const error = entry.error || result.error || '';
     elements.detailError.hidden = !error;
     elements.detailError.textContent = error;
-    await loadRunFiles(entry.runId);
+    await Promise.all([loadRunFiles(entry.runId), loadAiAnalysis(entry.runId)]);
+  }
+
+  function setAiAnalysisState(mode, message = '') {
+    elements.aiAnalysisEmpty.hidden = mode !== 'empty';
+    elements.aiAnalysisLoading.hidden = mode !== 'loading';
+    elements.aiAnalysisContent.hidden = mode !== 'ready';
+    elements.aiAnalysisError.hidden = mode !== 'error';
+    elements.aiAnalysisStatus.className = `ai-status ai-status-${mode}`;
+    elements.aiAnalysisStatus.textContent = ({
+      empty: 'Не создан',
+      loading: 'Анализируем',
+      ready: 'Готов',
+      error: 'Ошибка',
+    })[mode] || 'Нет данных';
+    if (mode === 'error') elements.aiAnalysisError.textContent = message;
+  }
+
+  function appendStringList(parent, title, items, className = '') {
+    if (!Array.isArray(items) || items.length === 0) return;
+    const section = createElement('section', `ai-analysis-block${className ? ` ${className}` : ''}`);
+    section.append(createElement('h4', '', title));
+    const list = createElement('ul');
+    for (const item of items) list.append(createElement('li', '', item));
+    section.append(list);
+    parent.append(section);
+  }
+
+  function renderAiAnalysis(payload) {
+    const analysis = payload.analysis;
+    if (!analysis) {
+      setAiAnalysisState('empty');
+      elements.analyzeReportButton.disabled = !payload.configured;
+      elements.analyzeReportButton.title = payload.configured ? '' : 'OpenAI API не настроен на сервере';
+      return;
+    }
+
+    elements.aiAnalysisContent.replaceChildren();
+    const summary = payload.summary || {};
+    const market = analysis.marketSummary || {};
+    const quality = summary.signalCoverage || {};
+    const metrics = createElement('div', 'ai-metric-grid');
+    [
+      ['Объявления', summary.listingCount ?? market.analyzedListings ?? '—'],
+      ['Магазины', summary.uniqueShops ?? '—'],
+      ['Медиана', formatMoney(summary.pricesUsd?.median ?? market.medianPriceUsd)],
+      ['Уверенность', Number.isFinite(quality.averageConfidence) ? `${Math.round(quality.averageConfidence * 100)}%` : '—'],
+    ].forEach(([label, value]) => {
+      const item = createElement('div');
+      item.append(createElement('span', '', String(label)), createElement('strong', '', String(value)));
+      metrics.append(item);
+    });
+    elements.aiAnalysisContent.append(metrics);
+
+    if (Array.isArray(summary.warnings) && summary.warnings.length > 0) {
+      const warning = createElement('div', 'ai-quality-warning');
+      const icon = createElement('i');
+      icon.dataset.lucide = 'triangle-alert';
+      const copy = createElement('div');
+      copy.append(createElement('strong', '', 'Ограничения данных'));
+      const list = createElement('ul');
+      for (const item of summary.warnings) list.append(createElement('li', '', item));
+      copy.append(list);
+      warning.append(icon, copy);
+      elements.aiAnalysisContent.append(warning);
+    }
+
+    const concept = analysis.newProductConcept;
+    if (concept) {
+      const conceptSection = createElement('section', 'ai-concept');
+      const head = createElement('div', 'ai-concept-head');
+      const copy = createElement('div');
+      copy.append(createElement('span', 'eyebrow', 'Рекомендуемый продукт'), createElement('h4', '', concept.name));
+      const price = concept.recommendedPriceMinUsd === null || concept.recommendedPriceMaxUsd === null
+        ? 'Цена требует дополнительной проверки'
+        : `${formatMoney(concept.recommendedPriceMinUsd)}–${formatMoney(concept.recommendedPriceMaxUsd)}`;
+      head.append(copy, createElement('strong', 'ai-price', price));
+      conceptSection.append(head, createElement('p', 'ai-positioning', concept.positioning), createElement('p', 'ai-usp', concept.mainUSP));
+      appendStringList(conceptSection, 'Целевая аудитория', concept.targetAudience, 'compact');
+      appendStringList(conceptSection, 'Комплектация', concept.includedItems);
+      appendStringList(conceptSection, 'Бонусы', concept.bonuses);
+      appendStringList(conceptSection, 'План изображений', concept.imagePlan);
+      elements.aiAnalysisContent.append(conceptSection);
+    }
+
+    appendStringList(elements.aiAnalysisContent, 'Пробелы рынка', market.marketGaps);
+    appendStringList(elements.aiAnalysisContent, 'Повторяющиеся функции', market.commonFeatures, 'compact');
+
+    if (Array.isArray(analysis.recommendedFeatures) && analysis.recommendedFeatures.length > 0) {
+      const features = createElement('section', 'ai-analysis-block');
+      features.append(createElement('h4', '', 'Функции нового продукта'));
+      const list = createElement('div', 'ai-feature-list');
+      for (const feature of analysis.recommendedFeatures) {
+        const item = createElement('div');
+        item.append(createElement('span', `priority priority-${feature.priority}`, feature.priority.replace('_', ' ')));
+        const copy = createElement('div');
+        copy.append(createElement('strong', '', feature.name), createElement('p', '', feature.reason));
+        item.append(copy);
+        list.append(item);
+      }
+      features.append(list);
+      elements.aiAnalysisContent.append(features);
+    }
+
+    if (Array.isArray(analysis.topProducts) && analysis.topProducts.length > 0) {
+      const competitors = createElement('section', 'ai-analysis-block');
+      competitors.append(createElement('h4', '', 'Наиболее доказательные конкуренты'));
+      const list = createElement('div', 'ai-competitor-list');
+      for (const product of analysis.topProducts) {
+        const item = createElement('article');
+        const title = product.url.startsWith('https://www.etsy.com/')
+          ? createElement('a', '', product.title)
+          : createElement('strong', '', product.title);
+        if (title.tagName === 'A') {
+          title.href = product.url;
+          title.target = '_blank';
+          title.rel = 'noopener noreferrer';
+        }
+        item.append(createElement('span', 'rank', `#${product.rank}`), title, createElement('p', '', product.mainUSP));
+        list.append(item);
+      }
+      competitors.append(list);
+      elements.aiAnalysisContent.append(competitors);
+    }
+
+    appendStringList(elements.aiAnalysisContent, 'Риски и следующие проверки', analysis.risks, 'risks');
+    const actions = createElement('div', 'ai-analysis-actions');
+    const refreshButton = createElement('button', 'secondary-button');
+    refreshButton.type = 'button';
+    refreshButton.append(createElement('i'), createElement('span', '', 'Обновить AI-анализ'));
+    refreshButton.querySelector('i').dataset.lucide = 'refresh-cw';
+    refreshButton.addEventListener('click', () => void analyzeSelectedReport(true));
+    actions.append(refreshButton, createElement('small', '', `Модель: ${payload.model}`));
+    elements.aiAnalysisContent.append(actions);
+    setAiAnalysisState('ready');
+    refreshIcons();
+  }
+
+  async function loadAiAnalysis(runId) {
+    elements.aiAnalysisContent.replaceChildren();
+    elements.analyzeReportButton.disabled = true;
+    setAiAnalysisState('empty');
+    if (!runId || !state.apiKey) return;
+    try {
+      const payload = await api(`/runs/${encodeURIComponent(runId)}/ai-analysis`);
+      renderAiAnalysis(payload);
+    } catch (error) {
+      setAiAnalysisState('error', error.message);
+    }
+  }
+
+  async function analyzeSelectedReport(force = false) {
+    if (!state.selectedRunId) return;
+    setAiAnalysisState('loading');
+    try {
+      const payload = await api(`/runs/${encodeURIComponent(state.selectedRunId)}/ai-analysis`, {
+        method: 'POST',
+        body: JSON.stringify({ force }),
+      });
+      renderAiAnalysis(payload);
+      await loadRunFiles(state.selectedRunId);
+      showToast('AI-анализ готов', 'Рекомендации сохранены вместе с файлами отчёта.');
+    } catch (error) {
+      setAiAnalysisState('error', error.message);
+      showToast('Не удалось выполнить AI-анализ', error.message, 'error');
+    }
   }
 
   async function loadRunFiles(runId) {
@@ -635,6 +808,7 @@
     state.jobs = [];
     state.runs = [];
     state.selectedId = '';
+    state.selectedRunId = '';
     renderOverviewJobs();
     renderRunsList();
     updateConnectionUi(Boolean(state.health), state.health ? 'Production онлайн' : 'Нет соединения');
@@ -705,6 +879,7 @@
     document.querySelectorAll('[data-run-mode]').forEach((button) => button.addEventListener('click', () => {
       state.runMode = button.dataset.runMode;
       state.selectedId = '';
+      state.selectedRunId = '';
       document.querySelectorAll('[data-run-mode]').forEach((item) => item.classList.toggle('is-active', item === button));
       elements.detailEmpty.hidden = false;
       elements.detailContent.hidden = true;
@@ -716,6 +891,7 @@
       const job = state.jobs.find((item) => item.id === state.currentJobId);
       if (job) void selectEntry(normalizeJob(job));
     });
+    elements.analyzeReportButton.addEventListener('click', () => void analyzeSelectedReport(false));
   }
 
   async function init() {

@@ -2,6 +2,7 @@ import dotenv from 'dotenv';
 import path from 'path';
 
 dotenv.config();
+dotenv.config({ path: '.env.local', override: true });
 
 function env(key: string, fallback: string = ''): string {
   return process.env[key] ?? fallback;
@@ -28,6 +29,8 @@ export const config = {
   isProduction,
   anthropicApiKey: env('ANTHROPIC_API_KEY'),
   openaiApiKey: env('OPENAI_API_KEY'),
+  openaiModel: env('OPENAI_MODEL', 'gpt-5.6-luna'),
+  llmTimeoutMs: envInt('LLM_TIMEOUT_MS', 120_000),
   etsyApiKey: env('ETSY_API_KEY'),
   etsyDataSource: env('ETSY_DATA_SOURCE', 'api') as 'api' | 'scraper',
   etsyApiBaseUrl: env('ETSY_API_BASE_URL', 'https://api.etsy.com/v3/application'),

@@ -26,7 +26,7 @@ npm.cmd run playwright:install
 Copy-Item .env.example .env
 ```
 
-The CLI works without an LLM key. Set `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` only when using `--use-llm`. Market research requires `ETSY_API_KEY` in `keystring:shared_secret` format. The production web server separately requires a random `API_KEY` of at least 24 characters; 32+ is recommended.
+The CLI works without an LLM key. Set `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` when using `--use-llm` or the post-run AI analyst in Signal Lab. The default OpenAI model is `gpt-5.6-luna` and can be changed through `OPENAI_MODEL`. Market research requires `ETSY_API_KEY` in `keystring:shared_secret` format. The production web server separately requires a random `API_KEY` of at least 24 characters; 32+ is recommended.
 
 ## Etsy Open API setup
 
@@ -92,6 +92,7 @@ The production server includes the **Signal Lab** web panel at `/`. It provides:
 - validated research-job creation with conservative defaults;
 - live queue/job status and clear blocked/failed states;
 - retained job and stored-run browsing;
+- on-demand AI analysis of an existing report with deterministic metrics, data-quality warnings, competitor evidence, product positioning, pricing, packaging, and validation risks;
 - authenticated downloads for allowlisted JSON/CSV report files;
 - responsive desktop/mobile layouts with self-hosted Onest, Instrument Serif, and Lucide assets.
 
@@ -124,14 +125,17 @@ curl -X POST http://127.0.0.1:3000/jobs \
 | `GET /runs` | bearer | Stored run summaries |
 | `GET /runs/:id/files` | bearer | Allowlisted report-file metadata |
 | `GET /runs/:id/files/:name` | bearer | Download an allowlisted JSON/CSV report |
+| `GET /runs/:id/ai-analysis` | bearer | Read a saved AI market analysis or its readiness state |
+| `POST /runs/:id/ai-analysis` | bearer | Generate or refresh an AI analysis from a completed report |
 
 The API validates body size and fields, limits requests by client IP, caps the job queue, bounds child-process output, and shuts down active workers on `SIGTERM`/`SIGINT`. Etsy credentials saved through Signal Lab are verified before persistence, encrypted with AES-256-GCM using a key derived from the production `API_KEY`, and never returned to the browser. Rotating `API_KEY` requires entering the Etsy credential again. Configure `TRUST_PROXY=true` only behind a trusted proxy that replaces `X-Forwarded-For`.
 
 ## Quality gates
 
 ```bash
-npm run check       # typecheck + lint + 93 tests + build
+npm run check       # typecheck + lint + 97 tests + build
 npm run smoke:api   # health, auth, and validation smoke test
+npm run smoke:ai    # one safe live structured-output request (uses API credits)
 npm audit --audit-level=high
 ```
 
@@ -169,6 +173,9 @@ curl http://127.0.0.1:3000/health
 | `ETSY_API_KEY` | Etsy `keystring:shared_secret` stored in Secret Manager |
 | `ETSY_DATA_SOURCE` | `api` |
 | `ETSY_API_TIMEOUT_MS` | `30000` |
+| `OPENAI_API_KEY` | Dedicated OpenAI project key stored only in Secret Manager / `.env.local` |
+| `OPENAI_MODEL` | `gpt-5.6-luna` |
+| `LLM_TIMEOUT_MS` | `120000` |
 | `SCRAPER_CONCURRENCY` | `2` |
 | `SCRAPER_DELAY_MIN_MS` / `MAX` | `2500` / `6000` |
 | `API_KEY` | Random 32+ character secret |
