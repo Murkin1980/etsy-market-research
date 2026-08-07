@@ -117,6 +117,15 @@ function executeCliJob(job: ResearchJob): Promise<RunResultPayload> {
     let stdout = '';
     let stderr = '';
     let settled = false;
+    let timedOut = false;
+
+    const jobTimeout = config.server.jobTimeoutMs;
+    const watchdog = setTimeout(() => {
+      if (settled) return;
+      timedOut = true;
+      log.warn({ jobId: job.id, timeoutMs: jobTimeout }, 'Job timed out, killing child process');
+      child.kill('SIGKILL');
+    }, jobTimeout);
 
     child.stdout.on('data', (data: Buffer) => {
       stdout = (stdout + data.toString()).slice(-MAX_CHILD_OUTPUT_BYTES);
@@ -128,6 +137,7 @@ function executeCliJob(job: ResearchJob): Promise<RunResultPayload> {
     const finish = (code: number | null, spawnError?: Error): void => {
       if (settled) return;
       settled = true;
+      clearTimeout(watchdog);
       activeChildren.delete(child);
 
       if (spawnError) {
@@ -145,6 +155,11 @@ function executeCliJob(job: ResearchJob): Promise<RunResultPayload> {
           log.error({ jobId: job.id, error: result.error }, 'Job returned a failed result');
         }
         resolve(result);
+        return;
+      }
+
+      if (timedOut) {
+        reject(new Error(`Job timed out after ${jobTimeout} ms`));
         return;
       }
 

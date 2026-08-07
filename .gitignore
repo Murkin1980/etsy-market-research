@@ -6,6 +6,10 @@ data/raw/
 data/normalized/
 data/reports/
 data/checkpoints/
+data/runs/
+data/settings/
+data/auth/
+data/billing/
 logs/
 output/
 .playwright-cli/

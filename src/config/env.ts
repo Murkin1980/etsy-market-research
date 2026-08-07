@@ -68,6 +68,7 @@ export const config = {
     maxJobsRetained: envInt('MAX_JOBS_RETAINED', 100),
     maxRequestBodyBytes: envInt('MAX_REQUEST_BODY_BYTES', 16_384),
     sessionTtlDays: envInt('SESSION_TTL_DAYS', 7),
+    jobTimeoutMs: envInt('JOB_TIMEOUT_MS', 30 * 60 * 1000),
   },
   paddle: {
     apiKey: env('PADDLE_API_KEY'),
