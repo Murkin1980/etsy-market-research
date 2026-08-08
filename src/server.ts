@@ -17,6 +17,10 @@ import {
   parseLoginRequest,
   parseRegisterRequest,
   parseRunResultOutput,
+  parseVerifyEmailRequest,
+  parseResendVerificationRequest,
+  parseForgotPasswordRequest,
+  parseResetPasswordRequest,
   readRawBody,
   RequestBodyError,
   type RunResultPayload,
@@ -40,6 +44,7 @@ import {
 import { compareNiches } from './analysis/niche-comparison.js';
 import { AccountStore } from './auth/account-store.js';
 import { authenticateRequest, clearSessionCookie, sessionCookie, type RequestPrincipal } from './auth/http-auth.js';
+import { MailerService } from './notifications/mailer.js';
 import { RunOwnershipStore } from './storage/run-ownership.js';
 import { BillingStore, PLAN_CATALOG, QuotaExceededError } from './billing/billing-store.js';
 import { createPaddleCheckout, paddleConfigured, parsePaddleSubscriptionEvent, verifyPaddleWebhook } from './billing/paddle.js';
@@ -62,7 +67,21 @@ let credentialStore: EncryptedCredentialStore | null = null;
 const accountStore = new AccountStore(
   path.join(config.paths.auth, 'accounts.json'),
   config.server.sessionTtlDays,
+  config.mail.verificationTtlHours,
+  config.mail.resetTtlHours,
 );
+const mailer = new MailerService({
+  from: config.mail.from,
+  smtpHost: config.mail.host,
+  smtpPort: config.mail.port,
+  smtpSecure: config.mail.secure,
+  smtpUser: config.mail.user,
+  smtpPass: config.mail.pass,
+  publicBaseUrl: config.publicBaseUrl,
+  verificationTtlHours: config.mail.verificationTtlHours,
+  resetTtlHours: config.mail.resetTtlHours,
+  mailDir: config.paths.mail,
+});
 const runOwnershipStore = new RunOwnershipStore(path.join(config.paths.auth, 'run-owners.json'));
 const billingStore = new BillingStore(path.join(config.paths.billing, 'billing.json'));
 
@@ -199,6 +218,7 @@ function principalPayload(principal: RequestPrincipal, csrfToken: string | null)
       email: principal.authType === 'api-key' ? 'admin@local' : 'local@development',
       name: principal.authType === 'api-key' ? 'Production administrator' : 'Local administrator',
       role: principal.role,
+      emailVerified: true,
     },
     authType: principal.authType,
     csrfToken,
@@ -319,6 +339,8 @@ const server = http.createServer(async (req, res) => {
       aiAnalysisModel: config.openaiModel,
       authentication: 'accounts-and-admin-key',
       billing: paddleConfigured(config.paddle) ? 'paddle' : 'trial-only',
+      email: mailer.configured ? `smtp` : 'file',
+      publicRegistration: true,
     });
     return;
   }
@@ -359,10 +381,31 @@ const server = http.createServer(async (req, res) => {
   if (url.pathname === '/auth/register' && req.method === 'POST') {
     try {
       const input = parseRegisterRequest(await parseJsonBody(req, config.server.maxRequestBodyBytes));
-      const account = await accountStore.register(input);
+      const { account, verificationToken } = await accountStore.register(input);
+      await mailer.sendVerificationEmail(account.email, account.name, verificationToken);
+      sendJson(res, 201, { registered: true, email: account.email, verificationSent: true });
+    } catch (error) {
+      if (error instanceof RequestBodyError) {
+        sendJson(res, error.statusCode, { error: error.message, details: error.details });
+      } else {
+        sendJson(res, 422, { error: (error as Error).message });
+      }
+    }
+    return;
+  }
+
+  if (url.pathname === '/auth/verify-email' && req.method === 'POST') {
+    try {
+      const input = parseVerifyEmailRequest(await parseJsonBody(req, config.server.maxRequestBodyBytes));
+      const account = await accountStore.verifyEmail(input.token);
+      if (!account) {
+        sendJson(res, 400, { error: 'Ссылка для подтверждения недействительна или истекла' });
+        return;
+      }
       const session = accountStore.createSession(account.id);
       res.setHeader('Set-Cookie', sessionCookie(session.token, config.server.sessionTtlDays * 86_400, config.isProduction));
-      sendJson(res, 201, {
+      await mailer.sendWelcomeEmail(account.email, account.name);
+      sendJson(res, 200, {
         authenticated: true,
         user: account,
         authType: 'session',
@@ -372,7 +415,62 @@ const server = http.createServer(async (req, res) => {
       if (error instanceof RequestBodyError) {
         sendJson(res, error.statusCode, { error: error.message, details: error.details });
       } else {
-        sendJson(res, 422, { error: (error as Error).message });
+        log.error({ error: (error as Error).message }, 'Email verification failed');
+        sendJson(res, 500, { error: 'Email verification failed' });
+      }
+    }
+    return;
+  }
+
+  if (url.pathname === '/auth/resend-verification' && req.method === 'POST') {
+    try {
+      const input = parseResendVerificationRequest(await parseJsonBody(req, config.server.maxRequestBodyBytes));
+      const token = accountStore.resendVerificationToken(input.email);
+      if (token) {
+        const account = accountStore.findAccountByEmail(input.email);
+        if (account) await mailer.sendVerificationEmail(account.email, account.name, token);
+      }
+      sendJson(res, 200, { sent: true });
+    } catch (error) {
+      if (error instanceof RequestBodyError) {
+        sendJson(res, error.statusCode, { error: error.message, details: error.details });
+      } else {
+        sendJson(res, 500, { error: 'Failed to resend verification' });
+      }
+    }
+    return;
+  }
+
+  if (url.pathname === '/auth/forgot-password' && req.method === 'POST') {
+    try {
+      const input = parseForgotPasswordRequest(await parseJsonBody(req, config.server.maxRequestBodyBytes));
+      const request = accountStore.requestPasswordReset(input.email);
+      if (request) await mailer.sendPasswordResetEmail(input.email, request.name, request.token);
+      sendJson(res, 200, { sent: true });
+    } catch (error) {
+      if (error instanceof RequestBodyError) {
+        sendJson(res, error.statusCode, { error: error.message, details: error.details });
+      } else {
+        sendJson(res, 500, { error: 'Failed to send password reset' });
+      }
+    }
+    return;
+  }
+
+  if (url.pathname === '/auth/reset-password' && req.method === 'POST') {
+    try {
+      const input = parseResetPasswordRequest(await parseJsonBody(req, config.server.maxRequestBodyBytes));
+      const account = await accountStore.resetPassword(input.token, input.password);
+      if (!account) {
+        sendJson(res, 400, { error: 'Ссылка для сброса пароля недействительна или истекла' });
+        return;
+      }
+      sendJson(res, 200, { reset: true });
+    } catch (error) {
+      if (error instanceof RequestBodyError) {
+        sendJson(res, error.statusCode, { error: error.message, details: error.details });
+      } else {
+        sendJson(res, 500, { error: 'Failed to reset password' });
       }
     }
     return;
@@ -384,6 +482,10 @@ const server = http.createServer(async (req, res) => {
       const account = await accountStore.verifyPassword(input.email, input.password);
       if (!account) {
         sendJson(res, 401, { error: 'Email or password is incorrect' });
+        return;
+      }
+      if (!account.emailVerified) {
+        sendJson(res, 403, { error: 'Подтвердите адрес электронной почты перед входом', requiresVerification: true, email: account.email });
         return;
       }
       const session = accountStore.createSession(account.id);
@@ -781,7 +883,11 @@ server.listen(port, config.server.host, () => {
   console.log('Endpoints:');
   console.log('  GET  /health           - Health check (public)');
   console.log('  POST /auth/login       - Start an account session');
-  console.log('  POST /auth/register    - Create an invited account');
+  console.log('  POST /auth/register    - Public self-service registration');
+  console.log('  POST /auth/verify-email - Confirm an email address');
+  console.log('  POST /auth/resend-verification - Resend a verification link');
+  console.log('  POST /auth/forgot-password - Request a password reset link');
+  console.log('  POST /auth/reset-password - Set a new password from a reset token');
   console.log('  GET  /auth/me          - Read the current session');
   console.log('  POST /admin/invites    - Create a one-time invitation (admin)');
   console.log('  GET  /billing/status   - Read plan limits and monthly usage');
@@ -795,6 +901,7 @@ server.listen(port, config.server.host, () => {
   console.log('  POST /runs/:id/ai-analysis - Analyze a completed report');
   console.log('  PUT  /settings/etsy-api - Verify and save Etsy API credentials');
   if (config.server.apiKey) console.log('  Auth: account session or administrative Bearer API key');
+  console.log(`  Email: ${mailer.configured ? `SMTP (${mailer.mode})` : 'file delivery (SMTP not configured)'}`);
 
   if (runtimeEtsyApiKey) {
     void verifyEtsyApiKey(runtimeEtsyApiKey)

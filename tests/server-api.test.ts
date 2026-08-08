@@ -13,6 +13,10 @@ import {
   parsePlanChangeRequest,
   parseResearchJobRequest,
   parseRunResultOutput,
+  parseVerifyEmailRequest,
+  parseResendVerificationRequest,
+  parseForgotPasswordRequest,
+  parseResetPasswordRequest,
   RequestBodyError,
   secretsEqual,
 } from '../src/server-api.js';
@@ -75,6 +79,37 @@ describe('server API helpers', () => {
       name: 'Member',
       inviteCode: 'invite_12345678901234567890',
     })).toMatchObject({ name: 'Member' });
+    expect(parseRegisterRequest({
+      email: 'member2@example.com',
+      password: 'another strong password',
+      name: 'Member Two',
+    })).toMatchObject({ name: 'Member Two' });
+    expect(() => parseRegisterRequest({
+      email: 'member@example.com',
+      password: 'another strong password',
+      name: 'Member',
+      inviteCode: 'short',
+    })).toThrow(RequestBodyError);
+    expect(() => parseRegisterRequest({ email: 'member@example.com', password: 'x', name: 'M', inviteCode: undefined, admin: true })).toThrow(RequestBodyError);
+  });
+
+  it('validates email verification, resend, and password reset requests', () => {
+    expect(parseVerifyEmailRequest({ token: 'sl_12345678901234567890' })).toEqual({ token: 'sl_12345678901234567890' });
+    expect(() => parseVerifyEmailRequest({})).toThrow(RequestBodyError);
+    expect(() => parseVerifyEmailRequest({ token: 'x', admin: true })).toThrow(RequestBodyError);
+
+    expect(parseResendVerificationRequest({ email: 'member@example.com' })).toEqual({ email: 'member@example.com' });
+    expect(() => parseResendVerificationRequest({ email: 'bad' })).toThrow(RequestBodyError);
+    expect(() => parseResendVerificationRequest({ email: 'member@example.com', force: true })).toThrow(RequestBodyError);
+
+    expect(parseForgotPasswordRequest({ email: 'owner@example.com' })).toEqual({ email: 'owner@example.com' });
+    expect(() => parseForgotPasswordRequest({ email: '' })).toThrow(RequestBodyError);
+    expect(() => parseForgotPasswordRequest({ email: 'owner@example.com', token: 'x' })).toThrow(RequestBodyError);
+
+    expect(parseResetPasswordRequest({ token: 'sl_12345678901234567890', password: 'fresh secure password' })).toMatchObject({ token: 'sl_12345678901234567890' });
+    expect(() => parseResetPasswordRequest({ token: 'sl_12345678901234567890', password: 'short' })).toThrow(RequestBodyError);
+    expect(() => parseResetPasswordRequest({ token: 'sl_12345678901234567890' })).toThrow(RequestBodyError);
+    expect(() => parseResetPasswordRequest({ token: 'x', password: 'fresh secure password', extra: 1 })).toThrow(RequestBodyError);
   });
 
   it('validates plan changes and paid checkout plans', () => {

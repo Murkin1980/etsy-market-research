@@ -10,12 +10,17 @@ export interface PublicAccount {
   name: string;
   role: AccountRole;
   createdAt: string;
+  emailVerified: boolean;
 }
 
 interface StoredAccount extends PublicAccount {
   passwordSalt: string;
   passwordHash: string;
   disabled: boolean;
+  verificationTokenHash: string | null;
+  verificationTokenExpiresAt: string | null;
+  resetTokenHash: string | null;
+  resetTokenExpiresAt: string | null;
 }
 
 interface StoredSession {
@@ -38,7 +43,7 @@ interface StoredInvite {
 }
 
 interface AccountDatabase {
-  version: 1;
+  version: 2;
   accounts: StoredAccount[];
   sessions: StoredSession[];
   invites: StoredInvite[];
@@ -78,16 +83,23 @@ function publicAccount(account: StoredAccount): PublicAccount {
     name: account.name,
     role: account.role,
     createdAt: account.createdAt,
+    emailVerified: account.emailVerified,
   };
 }
 
 export class AccountStore {
   private database: AccountDatabase;
+  private verificationTtlMs: number;
+  private resetTtlMs: number;
 
   constructor(
     private readonly filePath: string,
     private readonly sessionTtlDays = 7,
+    verificationTtlHours = 24,
+    resetTtlHours = 1,
   ) {
+    this.verificationTtlMs = verificationTtlHours * 60 * 60 * 1_000;
+    this.resetTtlMs = resetTtlHours * 60 * 60 * 1_000;
     this.database = this.load();
     this.pruneExpired();
   }
@@ -117,34 +129,123 @@ export class AccountStore {
     return this.database.accounts.some((account) => account.id === accountId && !account.disabled);
   }
 
-  async register(input: { email: string; name: string; password: string; inviteCode: string }): Promise<PublicAccount> {
+  async register(input: {
+    email: string;
+    name: string;
+    password: string;
+    inviteCode?: string;
+  }): Promise<{ account: PublicAccount; verificationToken: string }> {
     this.pruneExpired();
     const email = input.email.trim().toLowerCase();
     if (this.database.accounts.some((account) => account.email === email)) {
       throw new Error('An account with this email already exists');
     }
-    const inviteHash = sha256(input.inviteCode.trim());
-    const invite = this.database.invites.find((candidate) => (
-      !candidate.usedAt && new Date(candidate.expiresAt).getTime() > Date.now() && safeEqualHex(candidate.codeHash, inviteHash)
-    ));
-    if (!invite) throw new Error('Invitation is invalid or expired');
+    let role: AccountRole = 'member';
+    if (input.inviteCode) {
+      const inviteHash = sha256(input.inviteCode.trim());
+      const invite = this.database.invites.find((candidate) => (
+        !candidate.usedAt && new Date(candidate.expiresAt).getTime() > Date.now() && safeEqualHex(candidate.codeHash, inviteHash)
+      ));
+      if (!invite) throw new Error('Invitation is invalid or expired');
+      role = invite.role;
+      invite.usedAt = new Date().toISOString();
+    }
 
     const salt = randomBytes(16).toString('base64url');
     const passwordHash = (await scrypt(input.password, salt)).toString('hex');
+    const { token: verificationToken, hash: verificationTokenHash, expiresAt: verificationTokenExpiresAt } = this.createToken(this.verificationTtlMs);
     const account: StoredAccount = {
       id: randomUUID(),
       email,
       name: input.name.trim(),
-      role: invite.role,
+      role,
       createdAt: new Date().toISOString(),
       passwordSalt: salt,
       passwordHash,
       disabled: false,
+      emailVerified: false,
+      verificationTokenHash,
+      verificationTokenExpiresAt,
+      resetTokenHash: null,
+      resetTokenExpiresAt: null,
     };
-    invite.usedAt = new Date().toISOString();
     this.database.accounts.push(account);
     this.save();
+    return { account: publicAccount(account), verificationToken };
+  }
+
+  findAccountByEmail(emailInput: string): PublicAccount | null {
+    const email = emailInput.trim().toLowerCase();
+    const account = this.database.accounts.find((candidate) => candidate.email === email && !candidate.disabled);
+    return account ? publicAccount(account) : null;
+  }
+
+  async verifyEmail(tokenInput: string): Promise<PublicAccount | null> {
+    this.pruneExpired();
+    const tokenHash = sha256(tokenInput.trim());
+    const account = this.database.accounts.find((candidate) => (
+      !candidate.emailVerified
+      && candidate.verificationTokenHash
+      && candidate.verificationTokenExpiresAt
+      && new Date(candidate.verificationTokenExpiresAt).getTime() > Date.now()
+      && safeEqualHex(candidate.verificationTokenHash, tokenHash)
+    ));
+    if (!account) return null;
+    account.emailVerified = true;
+    account.verificationTokenHash = null;
+    account.verificationTokenExpiresAt = null;
+    this.save();
     return publicAccount(account);
+  }
+
+  resendVerificationToken(emailInput: string): string | null {
+    this.pruneExpired();
+    const email = emailInput.trim().toLowerCase();
+    const account = this.database.accounts.find((candidate) => candidate.email === email && !candidate.disabled && !candidate.emailVerified);
+    if (!account) return null;
+    const { token, hash, expiresAt } = this.createToken(this.verificationTtlMs);
+    account.verificationTokenHash = hash;
+    account.verificationTokenExpiresAt = expiresAt;
+    this.save();
+    return token;
+  }
+
+  requestPasswordReset(emailInput: string): { token: string; name: string } | null {
+    this.pruneExpired();
+    const email = emailInput.trim().toLowerCase();
+    const account = this.database.accounts.find((candidate) => candidate.email === email && !candidate.disabled);
+    if (!account) return null;
+    const { token, hash, expiresAt } = this.createToken(this.resetTtlMs);
+    account.resetTokenHash = hash;
+    account.resetTokenExpiresAt = expiresAt;
+    this.save();
+    return { token, name: account.name };
+  }
+
+  async resetPassword(tokenInput: string, newPassword: string): Promise<PublicAccount | null> {
+    this.pruneExpired();
+    const tokenHash = sha256(tokenInput.trim());
+    const account = this.database.accounts.find((candidate) => (
+      candidate.resetTokenHash
+      && candidate.resetTokenExpiresAt
+      && new Date(candidate.resetTokenExpiresAt).getTime() > Date.now()
+      && safeEqualHex(candidate.resetTokenHash, tokenHash)
+    ));
+    if (!account) return null;
+    const salt = randomBytes(16).toString('base64url');
+    account.passwordSalt = salt;
+    account.passwordHash = (await scrypt(newPassword, salt)).toString('hex');
+    account.resetTokenHash = null;
+    account.resetTokenExpiresAt = null;
+    this.database.sessions = this.database.sessions.filter((session) => session.userId !== account.id);
+    this.save();
+    return publicAccount(account);
+  }
+
+  private createToken(ttlMs: number): { token: string; hash: string; expiresAt: string } {
+    const token = `sl_${randomBytes(32).toString('base64url')}`;
+    const expiresAt = new Date(Date.now() + ttlMs).toISOString();
+    return { token, hash: sha256(token), expiresAt };
   }
 
   async verifyPassword(emailInput: string, password: string): Promise<PublicAccount | null> {
@@ -212,12 +313,37 @@ export class AccountStore {
   }
 
   private load(): AccountDatabase {
-    if (!fs.existsSync(this.filePath)) return { version: 1, accounts: [], sessions: [], invites: [] };
-    const parsed = JSON.parse(fs.readFileSync(this.filePath, 'utf-8')) as AccountDatabase;
-    if (parsed.version !== 1 || !Array.isArray(parsed.accounts) || !Array.isArray(parsed.sessions) || !Array.isArray(parsed.invites)) {
+    if (!fs.existsSync(this.filePath)) return { version: 2, accounts: [], sessions: [], invites: [] };
+    const parsed = JSON.parse(fs.readFileSync(this.filePath, 'utf-8')) as Omit<AccountDatabase, 'version'> & { version: number };
+    if (parsed.version === 1) {
+      const migrated: AccountDatabase = {
+        version: 2,
+        accounts: parsed.accounts.map((account) => ({
+          id: account.id,
+          email: account.email,
+          name: account.name,
+          role: account.role,
+          createdAt: account.createdAt,
+          passwordSalt: account.passwordSalt,
+          passwordHash: account.passwordHash,
+          disabled: account.disabled,
+          emailVerified: true,
+          verificationTokenHash: null,
+          verificationTokenExpiresAt: null,
+          resetTokenHash: null,
+          resetTokenExpiresAt: null,
+        })),
+        sessions: parsed.sessions,
+        invites: parsed.invites,
+      };
+      this.database = migrated;
+      this.save();
+      return migrated;
+    }
+    if (parsed.version !== 2 || !Array.isArray(parsed.accounts) || !Array.isArray(parsed.sessions) || !Array.isArray(parsed.invites)) {
       throw new Error('Unsupported account database format');
     }
-    return parsed;
+    return parsed as AccountDatabase;
   }
 
   private pruneExpired(): void {

@@ -27,6 +27,7 @@ const isProduction = nodeEnv === 'production';
 export const config = {
   nodeEnv,
   isProduction,
+  publicBaseUrl: env('PUBLIC_BASE_URL', 'http://localhost:3000'),
   anthropicApiKey: env('ANTHROPIC_API_KEY'),
   openaiApiKey: env('OPENAI_API_KEY'),
   openaiModel: env('OPENAI_MODEL', 'gpt-5.6-luna'),
@@ -70,6 +71,16 @@ export const config = {
     sessionTtlDays: envInt('SESSION_TTL_DAYS', 7),
     jobTimeoutMs: envInt('JOB_TIMEOUT_MS', 30 * 60 * 1000),
   },
+  mail: {
+    from: env('MAIL_FROM', 'Signal Lab <no-reply@localhost>'),
+    host: env('SMTP_HOST'),
+    port: envInt('SMTP_PORT', 587),
+    secure: envBool('SMTP_SECURE', false),
+    user: env('SMTP_USER'),
+    pass: env('SMTP_PASS'),
+    verificationTtlHours: envInt('MAIL_VERIFY_TTL_HOURS', 24),
+    resetTtlHours: envInt('MAIL_RESET_TTL_HOURS', 1),
+  },
   paddle: {
     apiKey: env('PADDLE_API_KEY'),
     webhookSecret: env('PADDLE_WEBHOOK_SECRET'),
@@ -93,5 +104,6 @@ export const config = {
     billing: path.resolve('data/billing'),
     runs: path.resolve('data/runs'),
     logs: path.resolve('logs'),
+    mail: path.resolve('data/mail'),
   },
 } as const;

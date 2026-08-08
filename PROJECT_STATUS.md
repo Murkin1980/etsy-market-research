@@ -214,9 +214,23 @@ Status: **Completed; Paddle seller activation pending**
 - [x] Verify Paddle webhooks over the exact raw body with HMAC-SHA256, replay tolerance, price mapping, and idempotent lifecycle updates.
 - [x] Add a responsive Russian-language tariff screen with usage bars, plan comparison, safe unavailable-payment state, and administrator plan controls.
 - [x] Pass typecheck, lint, 107/107 tests, build, end-to-end quota/account smoke, desktop/mobile visual checks, and a zero-error browser console check.
-- [ ] Create and verify the Paddle seller account, products, recurring prices, default payment link, and production webhook destination; then add the five Paddle values to Google Secret Manager.
+- [ ] Create and verify the Paddle seller account, products, recurring prices, default payment link, and production webhook destination; then add the five Paddle values to Google Secret Manager. Step-by-step instructions are in [`deploy/PADDLE_ACTIVATION.md`](deploy/PADDLE_ACTIVATION.md).
 
-Next product stage: public onboarding, email verification, password recovery, and transactional notifications.
+## Stage 13 — Public onboarding, email verification, and password recovery
+
+Status: **Completed**
+
+- [x] Open self-service registration where the invitation code is optional and a fresh account joins as a member.
+- [x] Email verification: register issues a one-time verification link, the panel verifies it from the URL and auto-logs in, and unverified accounts cannot log in.
+- [x] Verification resend flow for accounts that have not confirmed their email.
+- [x] Password recovery: forgot-password link, reset token by email, new-password form, and session revocation on reset.
+- [x] Transactional mailer with an SMTP transport and a file fallback under `data/mail` for local development; TTLs for verification (24 h) and reset (1 h) links are configurable.
+- [x] Account database v1→v2 migration marks pre-existing invited accounts as verified so current users keep working.
+- [x] Panel UI updated for optional invite, verification/reset states, and clear Russian-language status messages.
+- [x] `.env.example` and README document `PUBLIC_BASE_URL`, `MAIL_FROM`, SMTP settings, and the new endpoints.
+- [x] Pass typecheck, full test suite (114/114), lint, and build; backend contract matches the panel handlers.
+
+Next product stage: activate Paddle billing (Stage 12 remaining task) so the tariff screen and quota enforcement are production-ready, then optionally wire email through a real SMTP provider.
 
 Official API flow:
 

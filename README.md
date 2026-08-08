@@ -26,7 +26,7 @@ npm.cmd run playwright:install
 Copy-Item .env.example .env
 ```
 
-The CLI works without an LLM key. Set `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` when using `--use-llm` or the post-run AI analyst in Signal Lab. The default OpenAI model is `gpt-5.6-luna` and can be changed through `OPENAI_MODEL`. Market research requires `ETSY_API_KEY` in `keystring:shared_secret` format. The production web server uses invited user accounts; a random `API_KEY` of 32+ characters remains the emergency administrator credential and bootstrap path for the first invitation.
+The CLI works without an LLM key. Set `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` when using `--use-llm` or the post-run AI analyst in Signal Lab. The default OpenAI model is `gpt-5.6-luna` and can be changed through `OPENAI_MODEL`. Market research requires `ETSY_API_KEY` in `keystring:shared_secret` format. The production web server uses public self-service accounts with optional invitation codes; a random `API_KEY` of 32+ characters remains the emergency administrator credential and bootstrap path for the first invitation. Verification and password-reset emails are sent over SMTP when configured (`SMTP_HOST` etc.), otherwise they are written as files under `data/mail`.
 
 ## Etsy Open API setup
 
@@ -87,7 +87,7 @@ The schema version is recorded in `run-result.json`, metadata, JSON, and CSV exp
 
 The production server includes the **Signal Lab** web panel at `/`. It provides:
 
-- invite-only accounts with scrypt password hashing, persistent HttpOnly/SameSite sessions, CSRF protection, and admin/member roles;
+- self-service public accounts with optional invitation codes, scrypt password hashing, email verification, password reset, persistent HttpOnly/SameSite sessions, CSRF protection, and admin/member roles;
 - personal workspaces that isolate retained jobs, runs, AI analyses, and report downloads by server-enforced ownership;
 - Trial, Pro, and Studio plans with server-enforced monthly research/AI quotas and per-run listing limits;
 - a responsive plan-and-usage screen plus administrator account/plan management;
@@ -123,7 +123,11 @@ curl -X POST http://127.0.0.1:3000/jobs \
 | `GET /` | public | Signal Lab web panel |
 | `GET /health` | public | Health and queue capacity |
 | `POST /auth/login` | public | Start a protected account session |
-| `POST /auth/register` | invite | Create an account from a one-time invitation |
+| `POST /auth/register` | public | Self-service account creation (optional invitation code; email verification required) |
+| `POST /auth/verify-email` | public | Confirm an email address from the emailed link |
+| `POST /auth/resend-verification` | public | Resend the verification email |
+| `POST /auth/forgot-password` | public | Request a password reset link |
+| `POST /auth/reset-password` | public | Set a new password from a reset token |
 | `GET /auth/me` | cookie/key | Restore the current session and rotate its CSRF token |
 | `POST /auth/logout` | session | Revoke the current session |
 | `POST /admin/invites` | admin | Create a one-time member/admin invitation |
@@ -198,6 +202,9 @@ curl http://127.0.0.1:3000/health
 | `API_KEY` | Random 32+ character secret |
 | `REQUIRE_API_KEY` | `true` |
 | `SESSION_TTL_DAYS` | `7` |
+| `PUBLIC_BASE_URL` | Public HTTPS origin used in emailed verification/reset links |
+| `MAIL_FROM` | Sender for verification and reset emails |
+| `SMTP_HOST` / `SMTP_PORT` | SMTP relay (empty host falls back to file delivery under `data/mail`) |
 | `MAX_CONCURRENT_JOBS` | `2` |
 | `MAX_QUEUED_JOBS` | `50` |
 | `SERVER_HOST` | `0.0.0.0` inside Docker |

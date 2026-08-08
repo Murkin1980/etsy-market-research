@@ -28,6 +28,7 @@
     billingAccounts: [],
     comparisonMode: false,
     comparisonRunIds: new Set(),
+    resetToken: '',
   };
 
   const $ = (id) => document.getElementById(id);
@@ -54,6 +55,18 @@
     inviteCodeInput: $('inviteCodeInput'),
     registerError: $('registerError'),
     registerButton: $('registerButton'),
+    forgotForm: $('forgotForm'),
+    forgotEmailInput: $('forgotEmailInput'),
+    forgotError: $('forgotError'),
+    forgotButton: $('forgotButton'),
+    backToLoginButton: $('backToLoginButton'),
+    resetForm: $('resetForm'),
+    resetPasswordInput: $('resetPasswordInput'),
+    resetError: $('resetError'),
+    resetButton: $('resetButton'),
+    backToLoginFromResetButton: $('backToLoginFromResetButton'),
+    resendVerificationButton: $('resendVerificationButton'),
+    forgotPasswordButton: $('forgotPasswordButton'),
     accessForm: $('accessForm'),
     apiKeyInput: $('apiKeyInput'),
     accessError: $('accessError'),
@@ -1165,6 +1178,19 @@
     });
   }
 
+  function showAuthPanel(mode) {
+    elements.authTabs.hidden = mode === 'reset' || mode === 'forgot' ? true : !hasAccess();
+    setAuthMode(mode);
+  }
+
+  function openResetPanel(token) {
+    state.resetToken = token;
+    elements.resetPasswordInput.value = '';
+    elements.resetError.hidden = true;
+    showAuthPanel('reset');
+    window.setTimeout(() => elements.resetPasswordInput.focus(), 50);
+  }
+
   function renderAccountState() {
     const authenticated = hasAccess();
     elements.authTabs.hidden = authenticated;
@@ -1213,6 +1239,7 @@
     event.preventDefault();
     elements.loginButton.disabled = true;
     elements.loginError.hidden = true;
+    elements.resendVerificationButton.hidden = true;
     try {
       const payload = await api('/auth/login', {
         method: 'POST', apiKeyOverride: '',
@@ -1228,6 +1255,10 @@
     } catch (error) {
       elements.loginError.textContent = error.message;
       elements.loginError.hidden = false;
+      if (error instanceof ApiError && error.status === 403 && error.payload?.requiresVerification) {
+        elements.resendVerificationButton.hidden = false;
+        elements.loginError.textContent = 'Адрес ещё не подтверждён. Проверьте почту или отправьте письмо повторно.';
+      }
     } finally {
       elements.loginButton.disabled = false;
     }
@@ -1238,24 +1269,82 @@
     elements.registerButton.disabled = true;
     elements.registerError.hidden = true;
     try {
-      const payload = await api('/auth/register', {
+      const body = {
+        name: elements.registerNameInput.value.trim(), email: elements.registerEmailInput.value.trim(),
+        password: elements.registerPasswordInput.value,
+      };
+      const inviteCode = elements.inviteCodeInput.value.trim();
+      if (inviteCode) body.inviteCode = inviteCode;
+      await api('/auth/register', {
         method: 'POST', apiKeyOverride: '',
-        body: JSON.stringify({
-          name: elements.registerNameInput.value.trim(), email: elements.registerEmailInput.value.trim(),
-          password: elements.registerPasswordInput.value, inviteCode: elements.inviteCodeInput.value.trim(),
-        }),
+        body: JSON.stringify(body),
       });
-      applyAuthPayload(payload);
       elements.registerPasswordInput.value = '';
       elements.inviteCodeInput.value = '';
-      elements.accessDialog.close();
-      showToast('Аккаунт создан', 'Ваше персональное рабочее пространство готово.');
-      await refreshProtectedData();
+      showAuthPanel('login');
+      elements.loginError.textContent = 'Аккаунт создан. Мы отправили письмо со ссылкой для подтверждения адреса — проверьте почту.';
+      elements.loginError.hidden = false;
+      elements.loginEmailInput.value = elements.registerEmailInput.value.trim();
+      elements.loginEmailInput.focus();
+      showToast('Проверьте почту', 'Отправили письмо для подтверждения email.');
     } catch (error) {
       elements.registerError.textContent = error.message;
       elements.registerError.hidden = false;
     } finally {
       elements.registerButton.disabled = false;
+    }
+  }
+
+  async function requestPasswordReset(event) {
+    event.preventDefault();
+    elements.forgotButton.disabled = true;
+    elements.forgotError.hidden = true;
+    try {
+      await api('/auth/forgot-password', {
+        method: 'POST', apiKeyOverride: '',
+        body: JSON.stringify({ email: elements.forgotEmailInput.value.trim() }),
+      });
+      elements.forgotError.textContent = 'Если аккаунт существует, мы отправили письмо со ссылкой для восстановления пароля.';
+      elements.forgotError.hidden = false;
+    } catch (error) {
+      elements.forgotError.textContent = error.message;
+      elements.forgotError.hidden = false;
+    } finally {
+      elements.forgotButton.disabled = false;
+    }
+  }
+
+  async function resetPassword(event) {
+    event.preventDefault();
+    elements.resetButton.disabled = true;
+    elements.resetError.hidden = true;
+    try {
+      await api('/auth/reset-password', {
+        method: 'POST', apiKeyOverride: '',
+        body: JSON.stringify({ token: state.resetToken, password: elements.resetPasswordInput.value }),
+      });
+      if (elements.accessDialog.open) elements.accessDialog.close();
+      showToast('Пароль обновлён', 'Теперь войдите с новым паролем.');
+      showAuthPanel('login');
+      elements.loginPasswordInput.value = '';
+    } catch (error) {
+      elements.resetError.textContent = error.message;
+      elements.resetError.hidden = false;
+    } finally {
+      elements.resetButton.disabled = false;
+    }
+  }
+
+  async function resendVerification() {
+    try {
+      await api('/auth/resend-verification', {
+        method: 'POST', apiKeyOverride: '',
+        body: JSON.stringify({ email: elements.loginEmailInput.value.trim() }),
+      });
+      showToast('Письмо отправлено', 'Проверьте почту и перейдите по новой ссылке.');
+    } catch (error) {
+      elements.loginError.textContent = error.message;
+      elements.loginError.hidden = false;
     }
   }
 
@@ -1353,6 +1442,17 @@
     document.querySelectorAll('[data-auth-mode]').forEach((button) => button.addEventListener('click', () => setAuthMode(button.dataset.authMode)));
     elements.loginForm.addEventListener('submit', loginAccount);
     elements.registerForm.addEventListener('submit', registerAccount);
+    elements.forgotForm.addEventListener('submit', requestPasswordReset);
+    elements.resetForm.addEventListener('submit', resetPassword);
+    elements.forgotPasswordButton.addEventListener('click', () => {
+      elements.forgotEmailInput.value = elements.loginEmailInput.value;
+      elements.forgotError.hidden = true;
+      showAuthPanel('forgot');
+      elements.forgotEmailInput.focus();
+    });
+    elements.backToLoginButton.addEventListener('click', () => showAuthPanel('login'));
+    elements.backToLoginFromResetButton.addEventListener('click', () => showAuthPanel('login'));
+    elements.resendVerificationButton.addEventListener('click', () => void resendVerification());
     elements.accessForm.addEventListener('submit', connectAccess);
     elements.logoutButton.addEventListener('click', () => void logoutAccount());
     elements.closeAccountButton.addEventListener('click', () => elements.accessDialog.close());
@@ -1395,6 +1495,38 @@
     document.querySelectorAll('[data-report-tab]').forEach((button) => button.addEventListener('click', () => setReportTab(button.dataset.reportTab)));
   }
 
+  async function handleAuthParams() {
+    const params = new URLSearchParams(window.location.search);
+    const verifyToken = params.get('verify');
+    const resetToken = params.get('reset');
+    if (verifyToken) {
+      try {
+        const payload = await api('/auth/verify-email', {
+          method: 'POST', apiKeyOverride: '',
+          body: JSON.stringify({ token: verifyToken }),
+        });
+        window.history.replaceState({}, '', window.location.pathname);
+        state.apiKey = '';
+        sessionStorage.removeItem(API_KEY_STORAGE);
+        applyAuthPayload(payload);
+        if (elements.accessDialog.open) elements.accessDialog.close();
+        showToast('Email подтверждён', 'Аккаунт активирован — ваше рабочее пространство готово.');
+        await refreshProtectedData();
+        return;
+      } catch (error) {
+        window.history.replaceState({}, '', window.location.pathname);
+        openAccessDialog(error instanceof ApiError && error.message ? error.message : 'Не удалось подтвердить email.');
+        setAuthMode('login');
+        return;
+      }
+    }
+    if (resetToken) {
+      window.history.replaceState({}, '', window.location.pathname);
+      elements.accessDialog.showModal();
+      openResetPanel(resetToken);
+    }
+  }
+
   async function init() {
     refreshIcons();
     setupEvents();
@@ -1404,6 +1536,7 @@
     const restored = await restoreAccess();
     if (restored) await refreshProtectedData();
     else window.setTimeout(() => openAccessDialog(), 250);
+    await handleAuthParams();
     window.setInterval(() => void refreshHealth(), 30000);
   }
 
