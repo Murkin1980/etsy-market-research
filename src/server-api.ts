@@ -55,7 +55,24 @@ export const LoginRequestSchema = z.object({
 
 export const RegisterRequestSchema = LoginRequestSchema.extend({
   name: z.string().trim().min(2).max(80),
-  inviteCode: z.string().trim().min(20).max(100),
+  inviteCode: z.string().trim().min(20).max(100).optional(),
+}).strict();
+
+export const VerifyEmailRequestSchema = z.object({
+  token: z.string().trim().min(1).max(200),
+}).strict();
+
+export const ResendVerificationRequestSchema = z.object({
+  email: z.string().trim().email().max(254),
+}).strict();
+
+export const ForgotPasswordRequestSchema = z.object({
+  email: z.string().trim().email().max(254),
+}).strict();
+
+export const ResetPasswordRequestSchema = z.object({
+  token: z.string().trim().min(1).max(200),
+  password: z.string().min(12).max(128),
 }).strict();
 
 export const InviteRequestSchema = z.object({
@@ -72,6 +89,10 @@ export const CheckoutRequestSchema = z.object({
 
 export type LoginRequest = z.infer<typeof LoginRequestSchema>;
 export type RegisterRequest = z.infer<typeof RegisterRequestSchema>;
+export type VerifyEmailRequest = z.infer<typeof VerifyEmailRequestSchema>;
+export type ResendVerificationRequest = z.infer<typeof ResendVerificationRequestSchema>;
+export type ForgotPasswordRequest = z.infer<typeof ForgotPasswordRequestSchema>;
+export type ResetPasswordRequest = z.infer<typeof ResetPasswordRequestSchema>;
 export type InviteRequest = z.infer<typeof InviteRequestSchema>;
 export type PlanChangeRequest = z.infer<typeof PlanChangeRequestSchema>;
 export type CheckoutRequest = z.infer<typeof CheckoutRequestSchema>;
@@ -156,6 +177,30 @@ export function parseLoginRequest(input: unknown): LoginRequest {
 export function parseRegisterRequest(input: unknown): RegisterRequest {
   const parsed = RegisterRequestSchema.safeParse(input);
   if (!parsed.success) throw new RequestBodyError('Invalid registration request', 400, parsed.error.flatten());
+  return parsed.data;
+}
+
+export function parseVerifyEmailRequest(input: unknown): VerifyEmailRequest {
+  const parsed = VerifyEmailRequestSchema.safeParse(input);
+  if (!parsed.success) throw new RequestBodyError('Invalid email verification request', 400, parsed.error.flatten());
+  return parsed.data;
+}
+
+export function parseResendVerificationRequest(input: unknown): ResendVerificationRequest {
+  const parsed = ResendVerificationRequestSchema.safeParse(input);
+  if (!parsed.success) throw new RequestBodyError('Invalid resend request', 400, parsed.error.flatten());
+  return parsed.data;
+}
+
+export function parseForgotPasswordRequest(input: unknown): ForgotPasswordRequest {
+  const parsed = ForgotPasswordRequestSchema.safeParse(input);
+  if (!parsed.success) throw new RequestBodyError('Invalid password reset request', 400, parsed.error.flatten());
+  return parsed.data;
+}
+
+export function parseResetPasswordRequest(input: unknown): ResetPasswordRequest {
+  const parsed = ResetPasswordRequestSchema.safeParse(input);
+  if (!parsed.success) throw new RequestBodyError('Invalid password reset request', 400, parsed.error.flatten());
   return parsed.data;
 }
 

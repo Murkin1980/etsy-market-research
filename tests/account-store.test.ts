@@ -22,10 +22,10 @@ describe('account and session store', () => {
     const filePath = temporaryFile('accounts.json');
     const store = new AccountStore(filePath, 7);
     const invite = store.createInvite('legacy-admin', 'admin');
-    const account = await store.register({
+    const { account } = await store.register({
       email: 'Owner@Example.com', name: 'Owner', password: 'correct horse battery staple', inviteCode: invite.code,
     });
-    expect(account).toMatchObject({ email: 'owner@example.com', role: 'admin' });
+    expect(account).toMatchObject({ email: 'owner@example.com', role: 'admin', emailVerified: false });
     await expect(store.register({
       email: 'second@example.com', name: 'Second', password: 'another secure password', inviteCode: invite.code,
     })).rejects.toThrow(/cannot be completed/);
@@ -42,6 +42,70 @@ describe('account and session store', () => {
     expect(restored.verifyCsrf(authenticated!.sessionId, rotated)).toBe(true);
   });
 
+  it('registers a public member without an invite and verifies the email', async () => {
+    const filePath = temporaryFile('accounts.json');
+    const store = new AccountStore(filePath, 7);
+    const { account, verificationToken } = await store.register({
+      email: 'member@example.com', name: 'Member', password: 'correct horse battery staple',
+    });
+    expect(account).toMatchObject({ email: 'member@example.com', role: 'member', emailVerified: false });
+    expect(verificationToken).toMatch(/^sl_/);
+
+    expect(await store.verifyEmail('sl_wrong-token')).toBeNull();
+    const verified = await store.verifyEmail(verificationToken);
+    expect(verified).toMatchObject({ id: account.id, emailVerified: true });
+    expect(await store.verifyEmail(verificationToken)).toBeNull();
+
+    const { account: resendAccount } = await store.register({
+      email: 'resend@example.com', name: 'Resend', password: 'correct horse battery staple',
+    });
+    expect(store.resendVerificationToken('unknown@example.com')).toBeNull();
+    const resend = store.resendVerificationToken('resend@example.com');
+    expect(resend).toMatch(/^sl_/);
+    expect(await store.verifyEmail(resend!)).toMatchObject({ id: resendAccount.id, emailVerified: true });
+  });
+
+  it('resets a password and invalidates existing sessions', async () => {
+    const filePath = temporaryFile('accounts.json');
+    const store = new AccountStore(filePath, 7);
+    const { account } = await store.register({ email: 'reset@example.com', name: 'Reset', password: 'first secure password' });
+    const session = store.createSession(account.id);
+    expect(store.authenticate(session.token)).not.toBeNull();
+
+    expect(store.requestPasswordReset('unknown@example.com')).toBeNull();
+    const request = store.requestPasswordReset('reset@example.com');
+    expect(request).toMatchObject({ name: 'Reset' });
+    expect(request!.token).toMatch(/^sl_/);
+
+    const updated = await store.resetPassword('sl_bad-token', 'another secure password');
+    expect(updated).toBeNull();
+    const reset = await store.resetPassword(request!.token, 'fresh secure password');
+    expect(reset).toMatchObject({ id: account.id });
+
+    expect(store.authenticate(session.token)).toBeNull();
+    expect(await store.verifyPassword('reset@example.com', 'fresh secure password')).toMatchObject({ id: account.id });
+    expect(await store.verifyPassword('reset@example.com', 'first secure password')).toBeNull();
+  });
+
+  it('migrates a v1 account database and marks existing accounts as verified', async () => {
+    const filePath = temporaryFile('accounts.json');
+    const legacy = {
+      version: 1,
+      accounts: [{
+        id: 'legacy-1', email: 'legacy@example.com', name: 'Legacy', role: 'admin',
+        createdAt: new Date().toISOString(), passwordSalt: 'c2FsdA', passwordHash: '00'.repeat(64),
+        disabled: false,
+      }],
+      invites: [],
+      sessions: [],
+    };
+    fs.writeFileSync(filePath, JSON.stringify(legacy));
+    const store = new AccountStore(filePath, 7);
+    const account = store.findAccountByEmail('legacy@example.com');
+    expect(account).toMatchObject({ id: 'legacy-1', emailVerified: true });
+    expect(store.listAccounts()).toHaveLength(1);
+  });
+
   it('allows only one concurrent registration per one-time invitation', async () => {
     const store = new AccountStore(temporaryFile('accounts.json'), 7);
     const invite = store.createInvite('legacy-admin', 'admin');
@@ -53,17 +117,14 @@ describe('account and session store', () => {
     expect(store.listAccounts()).toHaveLength(1);
   });
 
-  it('does not reveal whether an email already exists when registration fails', async () => {
+  it('uses the same failure for known and unknown emails with an invalid invite', async () => {
     const store = new AccountStore(temporaryFile('accounts.json'), 7);
-    const invite = store.createInvite('legacy-admin');
-    await store.register({ email: 'known@example.com', name: 'Known', password: 'a secure password here', inviteCode: invite.code });
-    const invalidInvite = 'invite_this-code-is-not-valid-but-long-enough';
-    await expect(store.register({
-      email: 'known@example.com', name: 'Known', password: 'another secure password', inviteCode: invalidInvite,
-    })).rejects.toThrow('Registration cannot be completed with these details');
-    await expect(store.register({
-      email: 'unknown@example.com', name: 'Unknown', password: 'another secure password', inviteCode: invalidInvite,
-    })).rejects.toThrow('Registration cannot be completed with these details');
+    await store.register({ email: 'known@example.com', name: 'Known', password: 'a secure password here' });
+    const inviteCode = 'invite_this-code-is-not-valid-but-long-enough';
+    await expect(store.register({ email: 'known@example.com', name: 'Known', password: 'another secure password', inviteCode }))
+      .rejects.toThrow('Registration cannot be completed with these details');
+    await expect(store.register({ email: 'unknown@example.com', name: 'Unknown', password: 'another secure password', inviteCode }))
+      .rejects.toThrow('Registration cannot be completed with these details');
   });
 });
 
