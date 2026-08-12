@@ -28,7 +28,7 @@ describe('account and session store', () => {
     expect(account).toMatchObject({ email: 'owner@example.com', role: 'admin', emailVerified: false });
     await expect(store.register({
       email: 'second@example.com', name: 'Second', password: 'another secure password', inviteCode: invite.code,
-    })).rejects.toThrow(/invalid or expired/);
+    })).rejects.toThrow(/cannot be completed/);
 
     expect(await store.verifyPassword('owner@example.com', 'wrong password value')).toBeNull();
     expect(await store.verifyPassword('OWNER@example.com', 'correct horse battery staple')).toMatchObject({ id: account.id });
@@ -104,6 +104,27 @@ describe('account and session store', () => {
     const account = store.findAccountByEmail('legacy@example.com');
     expect(account).toMatchObject({ id: 'legacy-1', emailVerified: true });
     expect(store.listAccounts()).toHaveLength(1);
+  });
+
+  it('allows only one concurrent registration per one-time invitation', async () => {
+    const store = new AccountStore(temporaryFile('accounts.json'), 7);
+    const invite = store.createInvite('legacy-admin', 'admin');
+    const attempts = await Promise.allSettled([
+      store.register({ email: 'one@example.com', name: 'One', password: 'a secure password one', inviteCode: invite.code }),
+      store.register({ email: 'two@example.com', name: 'Two', password: 'a secure password two', inviteCode: invite.code }),
+    ]);
+    expect(attempts.filter((attempt) => attempt.status === 'fulfilled')).toHaveLength(1);
+    expect(store.listAccounts()).toHaveLength(1);
+  });
+
+  it('uses the same failure for known and unknown emails with an invalid invite', async () => {
+    const store = new AccountStore(temporaryFile('accounts.json'), 7);
+    await store.register({ email: 'known@example.com', name: 'Known', password: 'a secure password here' });
+    const inviteCode = 'invite_this-code-is-not-valid-but-long-enough';
+    await expect(store.register({ email: 'known@example.com', name: 'Known', password: 'another secure password', inviteCode }))
+      .rejects.toThrow('Registration cannot be completed with these details');
+    await expect(store.register({ email: 'unknown@example.com', name: 'Unknown', password: 'another secure password', inviteCode }))
+      .rejects.toThrow('Registration cannot be completed with these details');
   });
 });
 

@@ -91,7 +91,7 @@ The production server includes the **Signal Lab** web panel at `/`. It provides:
 - personal workspaces that isolate retained jobs, runs, AI analyses, and report downloads by server-enforced ownership;
 - Trial, Pro, and Studio plans with server-enforced monthly research/AI quotas and per-run listing limits;
 - a responsive plan-and-usage screen plus administrator account/plan management;
-- Paddle hosted checkout and signed, replay-resistant subscription webhooks; payment-card data never enters Signal Lab;
+- Paddle hosted checkout and signed, replay-resistant, order-aware subscription webhooks; payment-card data never enters Signal Lab;
 - emergency administrator API-key access stored only in the current browser tab;
 - Etsy Open API credential setup with live verification and encrypted persistent storage;
 - validated research-job creation with conservative defaults;
