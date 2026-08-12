@@ -67,6 +67,7 @@ export interface PaddleSubscriptionEvent {
   customerId: string | null;
   subscriptionId: string | null;
   currentPeriodEnd: string | null;
+  occurredAt: string;
 }
 
 export function parsePaddleSubscriptionEvent(input: unknown, prices: PaddleConfig['prices']): PaddleSubscriptionEvent | null {
@@ -84,10 +85,13 @@ export function parsePaddleSubscriptionEvent(input: unknown, prices: PaddleConfi
   const accountId = typeof customData.signal_lab_account_id === 'string' ? customData.signal_lab_account_id : '';
   const eventId = typeof event.event_id === 'string' ? event.event_id : '';
   if (!eventId || !accountId || !planId) return null;
-  const rawStatus = typeof data.status === 'string' ? data.status : '';
-  const status: SubscriptionStatus = eventType === 'subscription.canceled' || rawStatus === 'canceled'
+  const rawStatus = eventType === 'subscription.canceled'
     ? 'canceled'
-    : rawStatus === 'past_due' ? 'past_due' : 'active';
+    : typeof data.status === 'string' ? data.status : '';
+  if (!['trialing', 'active', 'past_due', 'paused', 'canceled'].includes(rawStatus)) return null;
+  const status = rawStatus as SubscriptionStatus;
+  const occurredAt = typeof event.occurred_at === 'string' ? event.occurred_at : '';
+  if (!occurredAt || !Number.isFinite(Date.parse(occurredAt))) return null;
   const currentBillingPeriod = data.current_billing_period && typeof data.current_billing_period === 'object'
     ? data.current_billing_period as Record<string, unknown> : {};
   return {
@@ -99,5 +103,6 @@ export function parsePaddleSubscriptionEvent(input: unknown, prices: PaddleConfi
     customerId: typeof data.customer_id === 'string' ? data.customer_id : null,
     subscriptionId: typeof data.id === 'string' ? data.id : null,
     currentPeriodEnd: typeof currentBillingPeriod.ends_at === 'string' ? currentBillingPeriod.ends_at : null,
+    occurredAt,
   };
 }

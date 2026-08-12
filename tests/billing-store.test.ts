@@ -32,11 +32,16 @@ describe('BillingStore', () => {
     const event = {
       eventId: 'evt_1', accountId: 'account-2', planId: 'studio' as const, status: 'active' as const,
       customerId: 'ctm_1', subscriptionId: 'sub_1', currentPeriodEnd: '2026-08-01T00:00:00Z',
+      occurredAt: '2026-07-15T00:00:00Z',
     };
     expect(store.applyPaddleSubscription(event)).toBe(true);
     expect(store.applyPaddleSubscription(event)).toBe(false);
     expect(store.status('account-2')).toMatchObject({ plan: { id: 'studio' }, subscription: { provider: 'paddle' } });
-    store.applyPaddleSubscription({ ...event, eventId: 'evt_2', status: 'canceled' });
+    store.applyPaddleSubscription({ ...event, eventId: 'evt_2', status: 'canceled', occurredAt: '2026-07-16T00:00:00Z' });
     expect(store.status('account-2')).toMatchObject({ plan: { id: 'trial' }, subscription: { status: 'canceled' } });
+    expect(store.applyPaddleSubscription({ ...event, eventId: 'evt_old', occurredAt: '2026-07-14T00:00:00Z' })).toBe(false);
+    expect(store.status('account-2')).toMatchObject({ plan: { id: 'trial' }, subscription: { status: 'canceled' } });
+    expect(store.applyPaddleSubscription({ ...event, eventId: 'evt_paused', status: 'paused', occurredAt: '2026-07-17T00:00:00Z' })).toBe(true);
+    expect(store.status('account-2')).toMatchObject({ plan: { id: 'trial' }, subscription: { status: 'paused' } });
   });
 });

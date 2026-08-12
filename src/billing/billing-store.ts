@@ -4,7 +4,7 @@ import path from 'path';
 export type PlanId = 'trial' | 'pro' | 'studio';
 export type UsageKind = 'research' | 'aiAnalysis';
 export type QuotaKind = UsageKind | 'maxListings';
-export type SubscriptionStatus = 'trialing' | 'active' | 'past_due' | 'canceled';
+export type SubscriptionStatus = 'trialing' | 'active' | 'past_due' | 'paused' | 'canceled';
 
 export interface PlanDefinition {
   id: PlanId;
@@ -28,6 +28,7 @@ interface SubscriptionRecord {
   providerSubscriptionId: string | null;
   currentPeriodEnd: string | null;
   updatedAt: string;
+  lastEventAt: string | null;
 }
 
 interface UsageRecord {
@@ -89,6 +90,7 @@ export class BillingStore {
         providerSubscriptionId: subscription.providerSubscriptionId,
         currentPeriodEnd: subscription.currentPeriodEnd,
         updatedAt: subscription.updatedAt,
+        lastEventAt: subscription.lastEventAt,
       },
       usage: { period: usage.period, research: usage.research, aiAnalysis: usage.aiAnalysis },
       remaining: {
@@ -146,18 +148,25 @@ export class BillingStore {
     customerId?: string | null;
     subscriptionId?: string | null;
     currentPeriodEnd?: string | null;
+    occurredAt: string;
   }): boolean {
     if (this.database.processedEvents.includes(input.eventId)) return false;
     const subscription = this.subscription(input.accountId);
-    subscription.planId = input.status === 'canceled' ? 'trial' : input.planId;
+    if (subscription.lastEventAt && Date.parse(input.occurredAt) <= Date.parse(subscription.lastEventAt)) {
+      this.rememberEvent(input.eventId);
+      this.save();
+      return false;
+    }
+    const paidAccess = input.status === 'active' || input.status === 'trialing' || input.status === 'past_due';
+    subscription.planId = paidAccess ? input.planId : 'trial';
     subscription.status = input.status;
-    subscription.provider = input.status === 'canceled' ? 'trial' : 'paddle';
+    subscription.provider = paidAccess ? 'paddle' : 'trial';
     subscription.providerCustomerId = input.customerId ?? subscription.providerCustomerId;
     subscription.providerSubscriptionId = input.subscriptionId ?? subscription.providerSubscriptionId;
     subscription.currentPeriodEnd = input.currentPeriodEnd ?? null;
     subscription.updatedAt = new Date().toISOString();
-    this.database.processedEvents.push(input.eventId);
-    this.database.processedEvents = this.database.processedEvents.slice(-1_000);
+    subscription.lastEventAt = input.occurredAt;
+    this.rememberEvent(input.eventId);
     this.save();
     return true;
   }
@@ -174,6 +183,7 @@ export class BillingStore {
         providerSubscriptionId: null,
         currentPeriodEnd: null,
         updatedAt: new Date().toISOString(),
+        lastEventAt: null,
       };
       this.database.subscriptions.push(subscription);
       this.save();
@@ -201,6 +211,7 @@ export class BillingStore {
     }
     for (const subscription of parsed.subscriptions) {
       if (!isPlanId(subscription.planId)) throw new Error('Unsupported billing plan');
+      subscription.lastEventAt ??= null;
     }
     return parsed;
   }
@@ -211,5 +222,10 @@ export class BillingStore {
     fs.writeFileSync(temporaryPath, JSON.stringify(this.database, null, 2), { encoding: 'utf-8', mode: 0o600 });
     fs.renameSync(temporaryPath, this.filePath);
     fs.chmodSync(this.filePath, 0o600);
+  }
+
+  private rememberEvent(eventId: string): void {
+    this.database.processedEvents.push(eventId);
+    this.database.processedEvents = this.database.processedEvents.slice(-1_000);
   }
 }

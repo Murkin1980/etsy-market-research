@@ -1,6 +1,20 @@
 # Etsy Market Research — Project Progress
 
-Last updated: 2026-07-15
+Last updated: 2026-08-12
+
+## Stage 13 — v1.7.2 Security and billing correctness
+
+Status: **Completed locally; deployment pending**
+
+`[█████████░] 90%`
+
+- [x] Serialize invitation redemption so one-time invitations remain one-time under concurrent requests
+- [x] Return a uniform registration failure without disclosing whether an email is registered
+- [x] Preserve Paddle paused state and remove paid access for paused/canceled subscriptions
+- [x] Reject undated/unknown Paddle subscription events and ignore out-of-order updates
+- [x] Refund reserved AI quota when OpenAI analysis fails
+- [x] Add regression coverage for concurrent registration and Paddle lifecycle ordering
+- [ ] Push v1.7.2 to GitHub and deploy it to Google Cloud
 
 ## Stage 10 — v1.7.1 Readable report workspace
 

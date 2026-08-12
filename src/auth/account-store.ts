@@ -83,6 +83,7 @@ function publicAccount(account: StoredAccount): PublicAccount {
 
 export class AccountStore {
   private database: AccountDatabase;
+  private registrationQueue: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly filePath: string,
@@ -118,33 +119,40 @@ export class AccountStore {
   }
 
   async register(input: { email: string; name: string; password: string; inviteCode: string }): Promise<PublicAccount> {
-    this.pruneExpired();
-    const email = input.email.trim().toLowerCase();
-    if (this.database.accounts.some((account) => account.email === email)) {
-      throw new Error('An account with this email already exists');
-    }
-    const inviteHash = sha256(input.inviteCode.trim());
-    const invite = this.database.invites.find((candidate) => (
-      !candidate.usedAt && new Date(candidate.expiresAt).getTime() > Date.now() && safeEqualHex(candidate.codeHash, inviteHash)
-    ));
-    if (!invite) throw new Error('Invitation is invalid or expired');
+    let releaseRegistration!: () => void;
+    const previousRegistration = this.registrationQueue;
+    this.registrationQueue = new Promise<void>((resolve) => { releaseRegistration = resolve; });
+    await previousRegistration;
 
-    const salt = randomBytes(16).toString('base64url');
-    const passwordHash = (await scrypt(input.password, salt)).toString('hex');
-    const account: StoredAccount = {
-      id: randomUUID(),
-      email,
-      name: input.name.trim(),
-      role: invite.role,
-      createdAt: new Date().toISOString(),
-      passwordSalt: salt,
-      passwordHash,
-      disabled: false,
-    };
-    invite.usedAt = new Date().toISOString();
-    this.database.accounts.push(account);
-    this.save();
-    return publicAccount(account);
+    try {
+      this.pruneExpired();
+      const email = input.email.trim().toLowerCase();
+      const inviteHash = sha256(input.inviteCode.trim());
+      const invite = this.database.invites.find((candidate) => (
+        !candidate.usedAt && new Date(candidate.expiresAt).getTime() > Date.now() && safeEqualHex(candidate.codeHash, inviteHash)
+      ));
+      const emailExists = this.database.accounts.some((account) => account.email === email);
+      if (!invite || emailExists) throw new Error('Registration cannot be completed with these details');
+
+      const salt = randomBytes(16).toString('base64url');
+      const passwordHash = (await scrypt(input.password, salt)).toString('hex');
+      const account: StoredAccount = {
+        id: randomUUID(),
+        email,
+        name: input.name.trim(),
+        role: invite.role,
+        createdAt: new Date().toISOString(),
+        passwordSalt: salt,
+        passwordHash,
+        disabled: false,
+      };
+      invite.usedAt = new Date().toISOString();
+      this.database.accounts.push(account);
+      this.save();
+      return publicAccount(account);
+    } finally {
+      releaseRegistration();
+    }
   }
 
   async verifyPassword(emailInput: string, password: string): Promise<PublicAccount | null> {

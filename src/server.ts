@@ -50,7 +50,7 @@ const rateLimitMap = new Map<string, number[]>();
 const RATE_WINDOW_MS = 60_000;
 const MAX_CHILD_OUTPUT_BYTES = 1_000_000;
 const MIN_PRODUCTION_API_KEY_LENGTH = 24;
-const APP_VERSION = '1.7.1';
+const APP_VERSION = '1.7.2';
 const activeChildren = new Set<ReturnType<typeof spawn>>();
 const activeAiAnalyses = new Set<string>();
 let rateLimitChecks = 0;
@@ -658,6 +658,7 @@ const server = http.createServer(async (req, res) => {
       sendJson(res, 404, { error: 'Run not found' });
       return;
     }
+    let aiQuotaConsumed = false;
     try {
       if (req.method === 'GET') {
         sendJson(res, 200, getRunAiAnalysis(
@@ -677,8 +678,12 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       const existingAnalysis = getRunAiAnalysis(config.paths.runs, runId, Boolean(config.openaiApiKey), config.openaiModel);
+      if (!config.openaiApiKey && (request.force || existingAnalysis.status !== 'ready')) {
+        throw new RunReportError('OpenAI API is not configured', 503);
+      }
       if (principal.authType === 'session' && (request.force || existingAnalysis.status !== 'ready')) {
         billingStore.consume(principal.userId, 'aiAnalysis');
+        aiQuotaConsumed = true;
       }
       activeAiAnalyses.add(runId);
       try {
@@ -695,6 +700,7 @@ const server = http.createServer(async (req, res) => {
         activeAiAnalyses.delete(runId);
       }
     } catch (error) {
+      if (aiQuotaConsumed) billingStore.refund(principal.userId, 'aiAnalysis');
       if (error instanceof QuotaExceededError) {
         sendJson(res, 402, { error: error.message, quota: error.kind, limit: error.limit });
       } else if (error instanceof RequestBodyError) {

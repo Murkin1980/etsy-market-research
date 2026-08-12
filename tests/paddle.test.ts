@@ -16,7 +16,7 @@ describe('Paddle billing integration', () => {
 
   it('extracts a mapped plan and account from subscription custom data', () => {
     const event = parsePaddleSubscriptionEvent({
-      event_id: 'evt_123', event_type: 'subscription.activated',
+      event_id: 'evt_123', event_type: 'subscription.activated', occurred_at: '2026-07-15T00:00:00Z',
       data: {
         id: 'sub_123', customer_id: 'ctm_123', status: 'active',
         custom_data: { signal_lab_account_id: 'account-123' },
@@ -24,6 +24,19 @@ describe('Paddle billing integration', () => {
         items: [{ price: { id: 'pri_pro' } }],
       },
     }, { pro: 'pri_pro', studio: 'pri_studio' });
-    expect(event).toMatchObject({ eventId: 'evt_123', accountId: 'account-123', planId: 'pro', status: 'active', subscriptionId: 'sub_123' });
+    expect(event).toMatchObject({ eventId: 'evt_123', accountId: 'account-123', planId: 'pro', status: 'active', subscriptionId: 'sub_123', occurredAt: '2026-07-15T00:00:00Z' });
+  });
+
+  it('preserves paused status and rejects unknown or undated subscription events', () => {
+    const baseEvent = {
+      event_id: 'evt_paused', event_type: 'subscription.paused', occurred_at: '2026-07-16T00:00:00Z',
+      data: {
+        id: 'sub_123', status: 'paused', custom_data: { signal_lab_account_id: 'account-123' },
+        items: [{ price: { id: 'pri_pro' } }],
+      },
+    };
+    expect(parsePaddleSubscriptionEvent(baseEvent, { pro: 'pri_pro' })).toMatchObject({ status: 'paused' });
+    expect(parsePaddleSubscriptionEvent({ ...baseEvent, occurred_at: undefined }, { pro: 'pri_pro' })).toBeNull();
+    expect(parsePaddleSubscriptionEvent({ ...baseEvent, data: { ...baseEvent.data, status: 'unknown' } }, { pro: 'pri_pro' })).toBeNull();
   });
 });
