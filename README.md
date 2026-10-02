@@ -39,6 +39,23 @@ Public active-listing search uses application authentication and does not requir
 
 The term "Etsy" is a trademark of Etsy, Inc. This application uses the Etsy API but is not endorsed or certified by Etsy, Inc.
 
+
+## Search source
+
+Default search uses the official Etsy Open API (`ETSY_DATA_SOURCE=api`) when configured, otherwise the Playwright browser scraper.
+
+Optional hosted source: set `SEARCH_SOURCE=apify` (or `ETSY_DATA_SOURCE=apify`) with `APIFY_TOKEN` to call `publicrecords/etsy-search-scraper` on your own Apify account. Pricing is $6 per 1,000 listing rows; blocked pages are not charged. The `instant_download` filter is passed through for digital-product niches.
+
+### Comparison (example keyword `digital planner`, 1 page, run Nz7Sydyx5OOvXMS5k)
+
+| metric | Apify search source |
+|---|---|
+| Rows returned | 56 |
+| Fields present | price, currency, badges (`bestseller`/`star_seller`/`etsys_pick`/`popular_now`), ad flag (`is_ad`), rank (`page`/`position`), listing id/url; title/rating/reviews/shop were sparse on this candidate build |
+| Runtime | ~39s |
+| Est. cost | ~$0.34 at $6/1,000 rows |
+
+
 ## Run research
 
 ```bash

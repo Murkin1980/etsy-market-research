@@ -4,6 +4,7 @@ import { config } from './config/env.js';
 import { APP_VERSION, SCHEMA_VERSION } from './config/defaults.js';
 import { closeBrowser, createBrowserManager } from './scraper/browser.js';
 import { scrapeSearchResults } from './scraper/search-scraper.js';
+import { apifySearch } from './scraper/apify-search.js';
 import { scrapeListing } from './scraper/listing-scraper.js';
 import type { ListingScrapeResult } from './scraper/listing-scraper.js';
 import { evaluateScrapeCompleteness } from './scraper/scrape-quality.js';
@@ -279,12 +280,28 @@ async function main(): Promise<void> {
 
   // Phase 1: Search discovery
   const useOfficialApi = config.etsyDataSource === 'api';
-  log.info({ source: useOfficialApi ? 'etsy-api' : 'browser-scraper' }, '=== Phase 1: Search Results ===');
+  const useApify = config.etsyDataSource === 'apify' || process.env.SEARCH_SOURCE === 'apify';
+  log.info(
+    { source: useApify ? 'apify' : useOfficialApi ? 'etsy-api' : 'browser-scraper' },
+    '=== Phase 1: Search Results ===',
+  );
   let searchResults: SearchResultItem[];
   let searchBlockedCount = 0;
   let mappedApiListings: Map<string, MappedApiListing> | null = null;
 
-  if (useOfficialApi) {
+  if (useApify) {
+    if (!config.apifyToken && !process.env.APIFY_TOKEN) {
+      throw new Error('APIFY_TOKEN is required when SEARCH_SOURCE=apify (or ETSY_DATA_SOURCE=apify).');
+    }
+    searchResults = await apifySearch(args.query, {
+      maxPages: args.pages,
+      instantDownload: true,
+      token: config.apifyToken || process.env.APIFY_TOKEN,
+      // Search Actor is currently unlisted; candidate is the published build tag.
+      build: process.env.APIFY_SEARCH_BUILD || 'candidate',
+    });
+    log.info({ returned: searchResults.length }, 'Apify Etsy search complete');
+  } else if (useOfficialApi) {
     if (!config.etsyApiKey) {
       throw new Error(
         'ETSY_API_KEY is not configured. Add the Etsy keystring and shared secret as keystring:shared_secret.',
